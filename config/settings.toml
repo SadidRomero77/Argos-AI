@@ -1,0 +1,25 @@
+# Configuración por defecto de ARGOS. NO poner secretos aquí — van en .env.
+# Precedencia: variable de entorno  >  .env  >  este archivo.
+# Toda variable de entorno lleva el prefijo ARGOS_ y usa __ para anidar.
+#   ej.  ARGOS_MODELS__ROUTINE="claude-haiku-4-5"
+
+[models]
+# Modelo por tipo de tarea. El router elige según la clasificación.
+routine     = "claude-haiku-4-5"      # herramientas simples, respuestas cortas
+reasoning   = "claude-sonnet-5"       # análisis, decisiones no triviales
+planning    = "claude-opus-5"         # planificación de largo horizonte
+local_only  = false                   # true = nunca llamar a una API externa
+local_url   = "http://localhost:8080" # servidor llama.cpp / Ollama
+
+[budget]
+# Presupuestos por tarea. El agente los conoce y se autolimita.
+max_iterations   = 12
+max_tokens_task  = 60000
+max_usd_per_day  = 2.0
+
+[paths]
+var        = "var"                       # datos en runtime (fuera de git)
+traces     = "var/traces"                # JSONL de auditoría
+memory_db  = "var/memory.db"
+permissions = "config/permissions.yaml"
+system_prompt = "config/prompts/system.md"
