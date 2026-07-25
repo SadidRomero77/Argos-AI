@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Atajos del día a día. Ejecutar desde la raíz del repo:  ./dev <comando>
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:$PATH"
+OLLAMA_LOG="$HOME/.local/ollama-dl/serve.log"
+
+_ollama_arriba() { curl -sf --max-time 2 http://localhost:11434/api/version >/dev/null 2>&1; }
+
+up() { # arranca el servidor local si no está
+  if _ollama_arriba; then
+    echo "✓ ollama ya está arriba"
+  else
+    echo "· arrancando ollama…"
+    mkdir -p "$(dirname "$OLLAMA_LOG")"
+    nohup ollama serve > "$OLLAMA_LOG" 2>&1 &
+    for _ in $(seq 1 30); do _ollama_arriba && break; sleep 1; done
+    _ollama_arriba && echo "✓ ollama arriba" || { echo "✗ no arrancó — mira $OLLAMA_LOG"; exit 1; }
+  fi
+  grep -m1 -i "inference compute" "$OLLAMA_LOG" 2>/dev/null \
+    | grep -oE "library=[A-Za-z]+|available=\"[^\"]+\"" | tr '\n' ' ' || true
+  echo
+}
+
+down() { pkill -f "ollama serve" 2>/dev/null && echo "✓ ollama detenido" || echo "· no estaba corriendo"; }
+
+test() { echo "· suite rápida (sin API key, GPU ni servidor)"; uv run pytest; }
+
+testall() { up; echo "· suite rápida + integración contra el modelo real"; uv run pytest; uv run pytest -m needs_llm; }
+
+lint() { uv run ruff check --fix .; uv run ruff format .; uv run ruff check .; }
+
+eval() { up; uv run python -m argos.evals "${@:-qwen3:4b}"; }
+
+# Uso: ./dev ask "tu pregunta"
+ask() { up; uv run argos --local --approve ask "$@"; }
+
+# Igual que ask pero aprobando todo. Sólo para desarrollo supervisado.
+yolo() { up; uv run argos --local --approve yes "$@"; }
+
+# Última traza, legible
+trace() {
+  local f; f=$(ls -t var/traces/*.jsonl 2>/dev/null | head -1)
+  [ -z "$f" ] && { echo "no hay trazas todavía"; return; }
+  echo "· $f"
+  uv run python -c "
+import json,sys
+for l in open('$f',encoding='utf-8'):
+    d=json.loads(l); e=d['event']
+    if e=='router_decision': print(f\"  → {d['model']} ({d['kind']})\")
+    elif e=='permission':    print(f\"  {'✓' if d['allowed'] else '✗'} permiso {d['skill']}\")
+    elif e=='skill_call':    print(f\"  ⚙ {d['skill']}({json.dumps(d.get('params',{}),ensure_ascii=False)[:80]})\")
+    elif e=='skill_result':  print(f\"     {'ok' if d['ok'] else 'ERROR'}: {str(d.get('error') or d.get('output',''))[:100]}\")
+    elif e=='nudge':         print(f\"  ⚠ corrección al modelo\")
+    elif e=='turn_end':      print(f\"  ■ {d['stopped_because']} · {d['iterations']} iter · {d['tokens']} tokens\")
+"
+}
+
+status() { # panorama en 10 segundos
+  echo "commits:  $(git rev-list --count HEAD)   |   sin commitear: $(git status --porcelain | wc -l)"
+  echo "remoto:   $(git remote get-url origin 2>/dev/null || echo 'ninguno')"
+  echo -n "pruebas:  "; uv run pytest 2>&1 | grep -oE "[0-9]+ passed.*" | tail -1
+  echo -n "ollama:   "; _ollama_arriba && echo "arriba" || echo "abajo"
+  echo "modelos:  $(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | tr '\n' ' ')"
+}
+
+help() {
+  cat <<'EOF'
+  ./dev status          panorama del proyecto
+  ./dev up | down       arrancar / parar el modelo local
+  ./dev ask "..."       hablar con el agente (pide permiso por consola)
+  ./dev yolo "..."      igual, aprobando todo (desarrollo supervisado)
+  ./dev trace           ver qué hizo el agente en la última ejecución
+  ./dev test            suite rápida
+  ./dev testall         suite rápida + integración con el modelo real
+  ./dev eval [modelo]   banco de tool-calling
+  ./dev lint            formato y lint
+EOF
+}
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  up|down|test|testall|lint|eval|ask|yolo|trace|status|help) "$cmd" "$@" ;;
+  *) echo "comando desconocido: $cmd"; help; exit 1 ;;
+esac
