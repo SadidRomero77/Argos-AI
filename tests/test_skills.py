@@ -281,6 +281,47 @@ def test_glob_trunca_la_lista_pero_no_el_conteo(tmp_path):
     result = Glob(root=tmp_path).execute({"pattern": "*.py", "limit": 5})
 
     assert result.data["total"] == 30
-    assert len(result.data["paths"]) == 5
+    assert len(result.data["files"]) == 5
     assert "30 archivo(s)" in result.output
-    assert "primeros 5" in result.output
+    assert "se listan 5" in result.output
+
+
+def test_glob_devuelve_tamanos_ya_calculados(tmp_path):
+    """El modelo no debe parsear tamaños de la salida cruda de `find` o `ls -l`.
+
+    Se observó a qwen3:4b leer un número de inodo de `find -ls` como si fuera el
+    tamaño (621708 bytes para un archivo de 1704) y descartar con eso el conteo
+    correcto que glob le había dado.
+    """
+    (tmp_path / "chico.py").write_bytes(b"x" * 10)
+    (tmp_path / "grande.py").write_bytes(b"x" * 5000)
+
+    result = Glob(root=tmp_path).execute({"pattern": "*.py"})
+
+    assert result.data["largest"] == {"path": "grande.py", "bytes": 5000}
+    assert {f["path"]: f["bytes"] for f in result.data["files"]} == {
+        "chico.py": 10,
+        "grande.py": 5000,
+    }
+    assert "5000 bytes" in result.output
+
+
+def test_glob_ordena_por_tamano_si_se_pide(tmp_path):
+    for nombre, tam in (("a.py", 10), ("b.py", 900), ("c.py", 50)):
+        (tmp_path / nombre).write_bytes(b"x" * tam)
+
+    result = Glob(root=tmp_path).execute({"pattern": "*.py", "by_size": True})
+
+    assert [f["path"] for f in result.data["files"]] == ["b.py", "c.py", "a.py"]
+
+
+def test_glob_el_mayor_se_calcula_sobre_TODOS_no_sobre_los_listados(tmp_path):
+    """Truncar la lista no debe falsear cuál es el mayor."""
+    (tmp_path / "aaa_pequeno.py").write_bytes(b"x" * 10)
+    (tmp_path / "zzz_enorme.py").write_bytes(b"x" * 9999)
+
+    result = Glob(root=tmp_path).execute({"pattern": "*.py", "limit": 1})
+
+    assert len(result.data["files"]) == 1
+    assert result.data["files"][0]["path"] == "aaa_pequeno.py"  # orden alfabético
+    assert result.data["largest"]["path"] == "zzz_enorme.py"  # pero el mayor es correcto

@@ -104,16 +104,19 @@ class WriteNote(Skill):
 class GlobParams(BaseModel):
     pattern: str = Field(description="Patrón glob, ej. '**/*.py' o 'src/**/*.toml'")
     limit: int = Field(default=200, ge=1, le=2000, description="Máximo de rutas a listar")
+    by_size: bool = Field(
+        default=False, description="Ordenar de mayor a menor tamaño en vez de por ruta"
+    )
 
 
 class Glob(Skill):
     name = "glob"
     description = (
-        "Busca archivos por patrón y devuelve las rutas y CUÁNTAS hay. Úsala siempre "
-        "que necesites contar o localizar archivos ('cuántos .py hay', 'dónde están "
-        "los tests'). Es preferible a run_command para esto: aquí el conteo ya viene "
-        "hecho, mientras que con comandos tendrías que encadenar tuberías, que no "
-        "están disponibles."
+        "Busca archivos por patrón y devuelve, ya calculados, CUÁNTOS hay y el tamaño "
+        "en bytes de cada uno. Úsala siempre que necesites contar, localizar o comparar "
+        "tamaños de archivos ('cuántos .py hay', 'cuál es el más grande'). Prefiérela a "
+        "run_command para esto: el conteo y los tamaños vienen hechos, mientras que "
+        "parsear la salida cruda de 'find' o 'ls -l' es propenso a errores."
     )
     Params = GlobParams
 
@@ -123,25 +126,38 @@ class Glob(Skill):
     def run(self, params: GlobParams) -> SkillResult:
         # Se resuelve cada resultado contra la raíz: un patrón como '../**' no puede
         # sacar la búsqueda del proyecto.
-        rutas: list[str] = []
-        total = 0
-        for ruta in sorted(self.root.glob(params.pattern)):
+        encontrados: list[tuple[str, int]] = []
+        for ruta in self.root.glob(params.pattern):
             if not ruta.is_file():
                 continue
             try:
                 resolve_confined(ruta, self.root)
             except ConfinementError:
                 continue
-            total += 1
-            if len(rutas) < params.limit:
-                rutas.append(str(ruta.relative_to(self.root)))
+            encontrados.append((str(ruta.relative_to(self.root)), ruta.stat().st_size))
 
+        total = len(encontrados)
         if total == 0:
             return SkillResult.success(
-                f"0 archivos coinciden con '{params.pattern}'", total=0, paths=[]
+                f"0 archivos coinciden con '{params.pattern}'", total=0, files=[]
             )
 
+        # El tamaño se calcula aquí, no lo parsea el modelo. Se observó a qwen3:4b
+        # leer un número de inodo de `find -ls` como si fuera el tamaño, y descartar
+        # con eso el conteo correcto que esta misma skill le había dado.
+        encontrados.sort(key=lambda par: (-par[1], par[0]) if params.by_size else (par[0], 0))
+        mostrados = encontrados[: params.limit]
+
         cabecera = f"{total} archivo(s) coinciden con '{params.pattern}'"
-        if total > len(rutas):
-            cabecera += f" (se listan los primeros {len(rutas)})"
-        return SkillResult.success(cabecera + ":\n" + "\n".join(rutas), total=total, paths=rutas)
+        if total > len(mostrados):
+            cabecera += f" (se listan {len(mostrados)})"
+        cuerpo = "\n".join(f"{tam:>9} bytes  {ruta}" for ruta, tam in mostrados)
+
+        mayor_ruta, mayor_tam = max(encontrados, key=lambda par: par[1])
+        return SkillResult.success(
+            f"{cabecera}:\n{cuerpo}\n\nEl mayor es {mayor_ruta} ({mayor_tam} bytes).",
+            total=total,
+            files=[{"path": r, "bytes": t} for r, t in mostrados],
+            paths=[r for r, _ in mostrados],
+            largest={"path": mayor_ruta, "bytes": mayor_tam},
+        )
