@@ -165,9 +165,29 @@ class AgentLoop:
             messages.append({"role": "assistant", "content": response.raw_content or response.text})
 
             if not response.wants_tools:
-                # Antes de dar el turno por terminado: ¿escribió la llamada como
-                # texto en vez de emitirla? Se corrige UNA vez; insistir con un
-                # modelo que no sabe hacerlo sólo quema iteraciones.
+                # Turno degenerado: razonó y no produjo nada. Darlo por terminado
+                # dejaría la tarea sin hacer sin que nadie se entere.
+                if response.is_empty and not nudged:
+                    nudged = True
+                    result.nudges += 1
+                    if self.tracer is not None:
+                        self.tracer.emit(
+                            Event.NUDGE, motivo="respuesta_vacia", reasoning=response.reasoning
+                        )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Tu respuesta llegó vacía. Responde ahora directamente, "
+                                "o invoca la herramienta que necesites. Usa los nombres "
+                                f"exactos disponibles: {', '.join(self.registry.names)}."
+                            ),
+                        }
+                    )
+                    continue
+
+                # ¿Escribió la llamada como texto en vez de emitirla? Se corrige UNA
+                # vez; insistir con un modelo que no sabe hacerlo quema iteraciones.
                 if not nudged and (
                     skill := looks_like_text_tool_call(response.text, self.registry.names)
                 ):

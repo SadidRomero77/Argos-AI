@@ -360,3 +360,21 @@ def test_num_ctx_none_no_manda_options():
     )
     LocalProvider("m", num_ctx=None, client=cliente).complete([{"role": "user", "content": "x"}])
     assert "options" not in capturadas[0]
+
+
+def test_captura_el_campo_reasoning_de_ollama():
+    """Ignorarlo hace que un turno que sólo razonó parezca terminado con éxito."""
+    cliente = responder(
+        {
+            "choices": [
+                {
+                    "message": {"content": "", "reasoning": "Debería usar glob..."},
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+    )
+    r = LocalProvider("qwen3:8b", client=cliente).complete([{"role": "user", "content": "x"}])
+
+    assert r.reasoning.startswith("Debería usar glob")
+    assert r.is_empty, "razonar sin producir nada es un turno degenerado, no un éxito"

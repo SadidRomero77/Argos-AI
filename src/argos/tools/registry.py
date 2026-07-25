@@ -84,9 +84,9 @@ def default_registry(
     gate: PermissionGate | None = None, tracer: Tracer | None = None
 ) -> SkillRegistry:
     """Registro con las skills de Fase 1 (sin hardware)."""
-    from argos.skills.fs import ReadFile, WriteNote
+    from argos.skills.fs import Glob, ReadFile, WriteNote
     from argos.skills.shell import RunCommand
 
     registry = SkillRegistry(gate=gate, tracer=tracer)
-    registry.register_all(ReadFile(), WriteNote(), RunCommand())
+    registry.register_all(Glob(), ReadFile(), WriteNote(), RunCommand())
     return registry

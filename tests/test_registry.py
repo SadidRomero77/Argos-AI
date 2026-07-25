@@ -111,7 +111,7 @@ def test_las_definiciones_van_en_orden_estable():
 
 def test_el_registro_por_defecto_trae_las_skills_de_fase_1():
     registry = default_registry(gate=gate_con(Decision.ALLOW))
-    assert set(registry.names) == {"read_file", "write_note", "run_command"}
+    assert set(registry.names) == {"glob", "read_file", "write_note", "run_command"}
 
 
 def test_toda_ejecucion_queda_en_la_traza(tmp_path, monkeypatch):

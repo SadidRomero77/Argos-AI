@@ -22,6 +22,11 @@ skills:
     min_phase: 1
     reason: "Lectura confinada a la raíz del proyecto; sin efectos secundarios."
 
+  glob:
+    decision: allow
+    min_phase: 1
+    reason: "Sólo lista rutas dentro de la raíz; sin efectos secundarios."
+
   write_note:
     decision: allow
     min_phase: 1

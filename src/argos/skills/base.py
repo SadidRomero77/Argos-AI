@@ -109,7 +109,18 @@ class Skill(ABC):
 
     @classmethod
     def tool_definition(cls) -> dict[str, Any]:
-        """Definición en el formato de tool use de la API."""
+        """Definición en el formato de tool use de la API.
+
+        La descripción se prefija con el nombre literal de la herramienta. No es
+        redundancia: con descripciones en español y nombres en inglés, se observó
+        a qwen3:8b razonar sobre una función `busca_archivos` —traducida de la
+        descripción de `glob`— y luego no poder invocar nada, porque ese nombre
+        no existe. Anclar el identificador exacto en el texto lo evita.
+        """
         schema = cls.Params.model_json_schema()
         schema.pop("title", None)
-        return {"name": cls.name, "description": cls.description, "input_schema": schema}
+        return {
+            "name": cls.name,
+            "description": f"[{cls.name}] {cls.description}",
+            "input_schema": schema,
+        }

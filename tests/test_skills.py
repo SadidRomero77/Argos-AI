@@ -11,7 +11,7 @@ import pytest
 from pydantic import BaseModel
 
 from argos.skills.base import ConfinementError, Skill, SkillResult, resolve_confined
-from argos.skills.fs import ReadFile, WriteNote
+from argos.skills.fs import Glob, ReadFile, WriteNote
 from argos.skills.shell import RunCommand
 
 # ─────────────────────────── confinamiento de rutas ───────────────────────────
@@ -211,9 +211,76 @@ def test_tool_definition_tiene_la_forma_de_la_api():
     assert definicion["input_schema"]["type"] == "object"
     assert "path" in definicion["input_schema"]["properties"]
     # La descripción debe ser prescriptiva: dice cuándo usarla.
-    assert "sala" in definicion["description"] or "Úsala" in definicion["description"]
+    assert "Úsala" in definicion["description"]
+    # El nombre literal se ancla en el texto: evita que el modelo lo traduzca.
+    assert definicion["description"].startswith("[read_file]")
 
 
 def test_skill_result_es_evaluable_como_booleano():
     assert bool(SkillResult.success("ok"))
     assert not bool(SkillResult.fail("mal"))
+
+
+# ────────────────────────────────── glob ──────────────────────────────────────
+
+
+def test_glob_cuenta_y_lista(tmp_path):
+    (tmp_path / "src").mkdir()
+    for n in ("a.py", "b.py"):
+        (tmp_path / "src" / n).touch()
+    (tmp_path / "src" / "c.txt").touch()
+
+    result = Glob(root=tmp_path).execute({"pattern": "src/*.py"})
+
+    assert result.ok
+    assert result.data["total"] == 2
+    assert "2 archivo(s)" in result.output
+    assert sorted(result.data["paths"]) == ["src/a.py", "src/b.py"]
+
+
+def test_glob_recursivo(tmp_path):
+    (tmp_path / "a" / "b").mkdir(parents=True)
+    (tmp_path / "a" / "x.py").touch()
+    (tmp_path / "a" / "b" / "y.py").touch()
+
+    assert Glob(root=tmp_path).execute({"pattern": "**/*.py"}).data["total"] == 2
+
+
+def test_glob_sin_coincidencias_no_es_un_error(tmp_path):
+    """Cero resultados es información válida, no un fallo."""
+    result = Glob(root=tmp_path).execute({"pattern": "**/*.rs"})
+    assert result.ok
+    assert result.data["total"] == 0
+
+
+def test_glob_no_escapa_de_la_raiz(tmp_path):
+    """Un patrón con '..' no puede sacar la búsqueda del proyecto."""
+    (tmp_path.parent / "secreto_fuera.py").touch()
+    raiz = tmp_path / "proyecto"
+    raiz.mkdir()
+    (raiz / "dentro.py").touch()
+
+    result = Glob(root=raiz).execute({"pattern": "../*.py"})
+
+    assert result.data["total"] == 0
+    assert "secreto_fuera" not in result.output
+
+
+def test_glob_ignora_directorios(tmp_path):
+    (tmp_path / "paquete.py").mkdir()  # un directorio que acaba en .py
+    (tmp_path / "real.py").touch()
+
+    assert Glob(root=tmp_path).execute({"pattern": "*.py"}).data["total"] == 1
+
+
+def test_glob_trunca_la_lista_pero_no_el_conteo(tmp_path):
+    """El conteo debe ser exacto aunque no se listen todas las rutas."""
+    for i in range(30):
+        (tmp_path / f"f{i:02}.py").touch()
+
+    result = Glob(root=tmp_path).execute({"pattern": "*.py", "limit": 5})
+
+    assert result.data["total"] == 30
+    assert len(result.data["paths"]) == 5
+    assert "30 archivo(s)" in result.output
+    assert "primeros 5" in result.output

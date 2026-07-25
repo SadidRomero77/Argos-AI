@@ -391,3 +391,32 @@ def test_solo_corrige_una_vez_por_turno():
 def test_un_turno_normal_no_genera_correcciones():
     loop, _ = build(texto("respuesta normal sin json"))
     assert loop.run("hola").nudges == 0
+
+
+def test_una_respuesta_vacia_no_se_da_por_terminada():
+    """Observado con qwen3:8b: agota el presupuesto razonando y devuelve content=''.
+
+    Sin esto el turno se cerraba como COMPLETED con la tarea sin hacer y sin
+    ninguna señal de que algo había ido mal.
+    """
+    vacia = LLMResponse(text="", model="scripted", stop_reason="end_turn", reasoning="pensando…")
+    loop, provider = build(vacia, texto("ahora sí: 42"))
+
+    result = loop.run("cuenta algo")
+
+    assert result.nudges == 1
+    assert result.text == "ahora sí: 42"
+    correccion = provider.peticiones[1][-1]["content"]
+    assert "vacía" in correccion
+    # Le recordamos los nombres exactos, que es donde fallan los modelos pequeños.
+    assert "eco" in correccion
+
+
+def test_dos_respuestas_vacias_seguidas_no_entran_en_bucle():
+    vacia = LLMResponse(text="", model="scripted", stop_reason="end_turn")
+    loop, provider = build(vacia, vacia, vacia)
+
+    result = loop.run("x")
+
+    assert result.nudges == 1
+    assert len(provider.peticiones) == 2
