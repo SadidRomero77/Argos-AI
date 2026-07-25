@@ -78,6 +78,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
+    # En local, comprobar el servidor ANTES de empezar. Descubrir a mitad de un
+    # turno que no hay nada escuchando desperdicia el tiempo del usuario y deja
+    # una traza a medias.
+    if settings.models.local_only:
+        ok, mensaje = router.local_provider.health()
+        if not ok:
+            print(f"error: {mensaje}", file=sys.stderr)
+            return 2
+        if not args.quiet:
+            print(f"— {mensaje}", file=sys.stderr)
+
     registry = default_registry(gate=gate, tracer=tracer)
     loop = AgentLoop(router=router, registry=registry, tracer=tracer, settings=settings)
 

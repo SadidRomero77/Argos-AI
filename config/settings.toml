@@ -9,7 +9,9 @@ routine     = "claude-haiku-4-5"      # herramientas simples, respuestas cortas
 reasoning   = "claude-sonnet-5"       # análisis, decisiones no triviales
 planning    = "claude-opus-5"         # planificación de largo horizonte
 local_only  = false                   # true = nunca llamar a una API externa
-local_url   = "http://localhost:8080" # servidor llama.cpp / Ollama
+# Endpoint OpenAI-compatible. Ollama: :11434/v1 · llama.cpp server: :8080/v1
+local_url   = "http://localhost:11434/v1"
+local_model = "qwen3:4b"              # debe soportar tools: `ollama show <modelo>`
 
 [budget]
 # Presupuestos por tarea. El agente los conoce y se autolimita.

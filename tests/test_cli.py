@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
+import time
 
 from argos.cli import build_parser, main
 from argos.harness.permissions import AlwaysAllowApprover, ConsoleApprover, DenyAllApprover
@@ -35,12 +35,21 @@ def test_sin_credenciales_sale_con_codigo_2_y_mensaje_accionable(capsys, tmp_pat
     assert ".env" in error and "LOCAL_ONLY" in error
 
 
-def test_local_sin_proveedor_tambien_falla_en_vez_de_ir_a_la_nube(tmp_path, monkeypatch):
-    """El modo local nunca debe degradar silenciosamente a una API externa."""
+def test_local_sin_servidor_falla_rapido_y_no_va_a_la_nube(capsys, tmp_path, monkeypatch):
+    """Dos garantías: no degrada a la API externa, y avisa ANTES de gastar el turno.
+
+    Antes descubría el problema a mitad del primer turno, esperando el timeout
+    completo contra un puerto sin nadie escuchando.
+    """
     monkeypatch.setenv("ARGOS_PATHS__TRACES", str(tmp_path / "traces"))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-cualquier-cosa-larga")
+    # Puerto reservado a "descarte": garantiza connection refused inmediato.
+    monkeypatch.setenv("ARGOS_MODELS__LOCAL_URL", "http://127.0.0.1:9/v1")
 
-    from argos.models.router import LocalProviderUnavailable
+    inicio = time.monotonic()
+    codigo = main(["--local", "hola"])
+    transcurrido = time.monotonic() - inicio
 
-    with pytest.raises(LocalProviderUnavailable):
-        main(["--local", "hola"])
+    assert codigo == 2
+    assert transcurrido < 10, f"tardó {transcurrido:.1f}s en avisar; debe fallar rápido"
+    assert "no hay servidor local" in capsys.readouterr().err

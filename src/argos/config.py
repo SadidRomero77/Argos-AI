@@ -24,7 +24,8 @@ class ModelSettings(BaseModel):
     reasoning: str = "claude-sonnet-5"
     planning: str = "claude-opus-5"
     local_only: bool = False
-    local_url: str = "http://localhost:8080"
+    local_url: str = "http://localhost:11434/v1"
+    local_model: str = "qwen3:4b"
 
 
 class BudgetSettings(BaseModel):
