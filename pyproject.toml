@@ -38,7 +38,10 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-q --strict-markers"
+# Las pruebas de integración quedan fuera del bucle rápido: `uv run pytest` debe
+# funcionar en cualquier máquina, sin servidor ni GPU. Para correrlas:
+#   uv run pytest -m needs_llm
+addopts = "-q --strict-markers -m 'not needs_llm'"
 markers = [
     # Las skills deben poder probarse SIN modelo. Cualquier test que necesite
     # un LLM se marca aquí y queda excluido del bucle rápido de desarrollo.
