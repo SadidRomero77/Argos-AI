@@ -114,21 +114,48 @@ class AgentLoop:
     def system_prompt(self) -> str:
         """Se lee de disco una vez. Debe ser estable byte a byte: es el prefijo cacheado."""
         if self._system_prompt is None:
-            path = self.settings.paths.resolved("system_prompt")
-            self._system_prompt = path.read_text(encoding="utf-8") if path.is_file() else ""
+            # La identidad va primero: define quién es antes de decirle cómo actuar.
+            # Ambos archivos son estables byte a byte, así que el prefijo se cachea.
+            partes = []
+            for campo in ("identity_prompt", "system_prompt"):
+                ruta = self.settings.paths.resolved(campo)
+                if ruta.is_file():
+                    partes.append(ruta.read_text(encoding="utf-8").strip())
+            self._system_prompt = "\n\n---\n\n".join(partes)
         return self._system_prompt
+
+    def build_system(self, extra: str = "") -> str | list[dict[str, Any]]:
+        """Prompt de sistema: parte estable primero, contexto dinámico después.
+
+        La separación es deliberada por dos motivos. Uno de coste: la parte estable
+        es idéntica en cada turno, así que va en su propio bloque con `cache_control`
+        y se cobra al 10%. Y otro de comportamiento, que resultó ser el importante:
+        el contexto de memoria **no puede ir en el mensaje del usuario**. Se probó
+        así y un modelo de 4B recitaba el perfil en vez de responder — ante "guarda
+        que mi color favorito es azul", contestaba "eres Sadid, licenciado en
+        física…". Lo que está en el turno del usuario, el modelo lo entiende como
+        aquello a lo que debe responder.
+        """
+        if not extra:
+            return self.system_prompt
+        return [
+            {"type": "text", "text": self.system_prompt, "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": extra},
+        ]
 
     def run(
         self,
         user_message: str,
         kind: TaskKind = TaskKind.ROUTINE,
         history: list[dict[str, Any]] | None = None,
+        extra_system: str = "",
     ) -> TurnResult:
         messages: list[dict[str, Any]] = list(history or [])
         messages.append({"role": "user", "content": user_message})
 
         result = TurnResult()
         nudged = False
+        system = self.build_system(extra_system)
         tools = self.registry.tool_definitions()
         max_iter = self.settings.budget.max_iterations
         max_tokens_tarea = self.settings.budget.max_tokens_task
@@ -144,9 +171,7 @@ class AgentLoop:
                 break
 
             try:
-                response = self.router.complete(
-                    kind, messages, system=self.system_prompt, tools=tools
-                )
+                response = self.router.complete(kind, messages, system=system, tools=tools)
             except BudgetExceeded:
                 result.stopped_because = StopReason.USD_BUDGET
                 break

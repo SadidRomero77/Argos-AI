@@ -32,8 +32,7 @@ from fastapi.staticfiles import StaticFiles
 from argos.config import Settings, get_settings
 from argos.harness.loop import AgentLoop
 from argos.harness.permissions import PermissionGate, PermissionRequest
-from argos.memory.embeddings import OllamaEmbedder
-from argos.memory.store import MemoryStore
+from argos.memory.store import EntityKind, MemoryStore
 from argos.models.base import TaskKind
 from argos.models.providers import ProviderCatalog, ProviderKind, ProviderSpec
 from argos.models.router import ModelRouter
@@ -101,11 +100,37 @@ class Hub:
         self.gate = PermissionGate(
             approver=self.approver, tracer=self.tracer, settings=self.settings
         )
-        self.registry = default_registry(gate=self.gate, tracer=self.tracer)
         self.memory: MemoryStore | None = None
+        self.open_memory()  # antes del registro: decide si hay skills de memoria
+
+        # Con quién habla. Arranca en el dueño del equipo porque es lo más probable,
+        # pero el agente puede reasignarlo con `identify_speaker` si resulta ser
+        # otra persona. En Fase 2 lo reasignará el reconocimiento facial.
+        self.speaker: str = self.settings.agent.user
+        self.speaker_id: int | None = None
+
+        if self.memory is not None:
+            # Si el dueño ya está en memoria, los episodios se le asocian desde el
+            # primer turno en vez de quedar sueltos hasta que alguien se identifique.
+            entidad = self.memory.get_entity(EntityKind.PERSONA, self.speaker)
+            if entidad is not None:
+                self.speaker_id = entidad.id
+
+        self.registry = default_registry(
+            gate=self.gate,
+            tracer=self.tracer,
+            memory=self.memory,
+            on_identified=self.set_speaker,
+        )
         self.session = self.tracer.session_id
         self._history: list[dict[str, Any]] = []
         self._busy = False
+
+    def set_speaker(self, nombre: str, entity_id: int) -> None:
+        """Reasigna el interlocutor. Único punto de entrada, venga de donde venga."""
+        self.speaker, self.speaker_id = nombre, entity_id
+        self.tracer.emit(Event.SKILL_RESULT, skill="identify_speaker", ok=True, speaker=nombre)
+        self.send_sync({"type": "speaker", "name": nombre})
 
     # ── memoria ───────────────────────────────────────────────────────────
 
@@ -115,10 +140,9 @@ class Hub:
         if self.memory is not None:
             return self.memory
         try:
-            embedder = OllamaEmbedder()
-            ok, _ = embedder.health()
-            if not ok:
-                return None
+            from argos.memory.seed import build_embedder
+
+            embedder, _ = build_embedder(self.settings)
             self.memory = MemoryStore(self.settings.paths.resolved("memory_db"), embedder)
         except Exception:
             return None
@@ -172,30 +196,66 @@ class Hub:
         contexto = ""
         if memoria is not None:
             try:
-                recuerdos = memoria.recall_episodes(texto, limit=4)
-                reglas = memoria.rules(limit=8)
+                # El perfil del interlocutor va SIEMPRE, sin pasar por similitud.
+                perfil = memoria.facts_about(self.speaker)
+                hechos = memoria.recall_facts(texto, limit=5)
+                recuerdos = memoria.recall_episodes(texto, limit=3)
+                reglas = memoria.rules(limit=6)
                 partes = []
+                if perfil:
+                    lineas = "\n".join(f"- {self.speaker} {h.fact}" for h in perfil)
+                    # El puente pronominal es imprescindible: los hechos se guardan
+                    # en tercera persona ("Sadid es físico") y las preguntas llegan
+                    # en primera ("¿quién soy yo?"). Sin decirlo explícitamente, un
+                    # modelo de 4B tiene el dato delante y responde "no lo sé".
+                    partes.append(
+                        f"Estás hablando con {self.speaker}. Cuando dice «yo», «mi» o "
+                        f"«me» se refiere a {self.speaker}. Esto es lo que sabes de "
+                        f"él:\n{lineas}"
+                    )
+                else:
+                    # Sin perfil, decírselo explícitamente. Si no, el modelo responde
+                    # "no tengo información" y ahí muere la conversación; el objetivo
+                    # es que pregunte y aprenda.
+                    partes.append(
+                        f"No sabes todavía quién es la persona con la que hablas (no "
+                        f"tienes datos guardados sobre «{self.speaker}»). Si la "
+                        f"conversación lo pide, preséntate y pregúntale su nombre; "
+                        f"cuando te lo diga, usa identify_speaker."
+                    )
+                if hechos:
+                    lineas = "\n".join(f"- {h.subject}: {h.fact}" for h in hechos)
+                    partes.append(f"Datos que ya sabes:\n{lineas}")
                 if recuerdos:
                     lineas = "\n".join(f"- {r.content}" for r in recuerdos)
-                    partes.append(f"Recuerdas de conversaciones anteriores:\n{lineas}")
+                    partes.append(f"Fragmentos de conversaciones previas:\n{lineas}")
                 if reglas:
                     lineas = "\n".join(f"- {r.render()}" for r in reglas)
-                    partes.append(f"Reglas que has aprendido:\n{lineas}")
-                contexto = "\n\n".join(partes)
+                    partes.append(f"Reglas que aprendiste:\n{lineas}")
+                contexto = (
+                    "<memoria>\n" + "\n\n".join(partes) + "\n</memoria>\n"
+                    "Eso es lo que sabes. Úsalo para responder con naturalidad, sin "
+                    "recitarlo: si no viene a cuento de lo que te preguntan, ignóralo."
+                )
             except Exception:
                 contexto = ""
 
-        mensaje = f"{contexto}\n\n---\n\n{texto}" if contexto else texto
-
+        # El contexto va al prompt de SISTEMA, no al mensaje del usuario: probado
+        # al revés, el modelo recitaba el perfil en vez de responder la pregunta.
         loop_agente = self.build_loop()
-        resultado = loop_agente.run(mensaje, history=list(self._history))
+        resultado = loop_agente.run(texto, history=list(self._history), extra_system=contexto)
 
         # Registrar DESPUÉS: la conversación de hoy es el recuerdo de mañana.
+        # Los episodios quedan asociados a la persona con la que se habló, así que
+        # mañana se pueden recuperar filtrando por ella. Si `identify_speaker` se
+        # invocó a mitad de este turno, `self.speaker_id` ya apunta a la correcta.
         if memoria is not None:
             try:
-                memoria.remember_episode(self.session, "user", texto)
+                memoria.remember_episode(self.session, "user", texto, entity_id=self.speaker_id)
                 if resultado.text:
-                    memoria.remember_episode(self.session, "agent", resultado.text)
+                    memoria.remember_episode(
+                        self.session, "agent", resultado.text, entity_id=self.speaker_id
+                    )
             except Exception:
                 pass
 

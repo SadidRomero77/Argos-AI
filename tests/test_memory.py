@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from argos.memory.embeddings import FakeEmbedder, normalize
+from argos.memory.embeddings import FakeEmbedder, LexicalEmbedder, normalize
 from argos.memory.store import EntityKind, MemoryStore
 
 
@@ -127,7 +127,9 @@ def test_la_recencia_desempata(store):
         store.remember_episode("s1", "user", f"nota número {i}")
 
     # Con todo el peso en recencia, lo último guardado debe encabezar.
-    resultados = store.recall_episodes("cualquier cosa", limit=1, recency_weight=1.0)
+    resultados = store.recall_episodes(
+        "cualquier cosa", limit=1, recency_weight=1.0, min_similarity=-1.0
+    )
     assert resultados[0].content == "nota número 4"
 
 
@@ -137,7 +139,7 @@ def test_se_puede_filtrar_por_entidad(store):
     store.remember_episode("s1", "user", "conversación con Ana", entity_id=ana)
     store.remember_episode("s1", "user", "conversación con Beto", entity_id=beto)
 
-    resultados = store.recall_episodes("conversación", entity_id=ana)
+    resultados = store.recall_episodes("conversación", entity_id=ana, min_similarity=-1.0)
 
     assert len(resultados) == 1
     assert "Ana" in resultados[0].content
@@ -173,7 +175,7 @@ def test_recupera_hechos_por_sujeto(store):
     store.remember_fact("Sadid", "trabaja en WSL2")
     store.remember_fact("Ana", "vive en Bogotá")
 
-    resultados = store.recall_facts("dónde", subject="Ana")
+    resultados = store.recall_facts("dónde", subject="Ana", min_similarity=-1.0)
 
     assert len(resultados) == 1
     assert resultados[0].fact == "vive en Bogotá"
@@ -225,7 +227,7 @@ def test_cambiar_de_modelo_de_embeddings_no_rompe_el_arranque(tmp_path):
         s.remember_episode("s1", "user", "recuerdo con vectores de 64 dimensiones")
 
     with MemoryStore(ruta, embedder=FakeEmbedder(dimensions=128)) as s:
-        assert s.recall_episodes("recuerdo") == []  # inaccesible, pero sin excepción
+        assert s.recall_episodes("recuerdo", min_similarity=-1.0) == []
         s.remember_episode("s2", "user", "recuerdo nuevo de 128")
         assert len(s.recall_episodes("recuerdo nuevo de 128", limit=1)) == 1
 
@@ -284,3 +286,32 @@ def test_la_recencia_no_aplasta_una_similitud_claramente_mejor():
         top = s.recall_episodes("consulta", limit=1)[0]
 
     assert top.content == "muy relevante", "lo reciente e irrelevante le ganó a lo pertinente"
+
+
+def test_un_saludo_no_recupera_recuerdos_irrelevantes(tmp_path):
+    """Regresión del fallo más visible que ha tenido el agente.
+
+    Con un solo recuerdo guardado ("hay 33 archivos .py"), decirle "hola" lo
+    recuperaba —era el más parecido por descarte— y el agente respondía al
+    saludo hablando de archivos. Devolver NADA es lo correcto cuando nada viene
+    a cuento.
+    """
+    with MemoryStore(tmp_path / "m.db", embedder=LexicalEmbedder()) as store:
+        store.remember_episode("s1", "user", "en la carpeta src hay 33 archivos punto py")
+
+        assert store.recall_episodes("hola qué tal me escuchas") == []
+        # ...pero una pregunta pertinente sí lo encuentra
+        assert store.recall_episodes("cuántos archivos punto py hay en la carpeta src")
+
+
+def test_el_umbral_es_configurable(store):
+    store.remember_episode("s1", "user", "un recuerdo cualquiera")
+    assert store.recall_episodes("algo sin relación", min_similarity=0.99) == []
+    assert store.recall_episodes("algo sin relación", min_similarity=-1.0)
+
+
+def test_los_hechos_tambien_filtran_por_relevancia(tmp_path):
+    with MemoryStore(tmp_path / "m.db", embedder=LexicalEmbedder()) as store:
+        store.remember_fact("Sadid", "es licenciado en física")
+        assert store.recall_facts("qué tiempo hace mañana en la playa") == []
+        assert store.recall_facts("Sadid es licenciado en física")

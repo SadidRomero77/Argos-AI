@@ -77,3 +77,26 @@ skills:
     decision: allow
     min_phase: 4
     reason: "Detenerse SIEMPRE se permite. Nunca pedir permiso para frenar."
+
+  # ── Memoria: el agente gestiona lo que recuerda ─────────────────────────
+  remember:
+    decision: allow
+    min_phase: 1
+    reason: "Guardar un dato es reversible y es el mecanismo central del agente."
+
+  recall:
+    decision: allow
+    min_phase: 1
+    reason: "Sólo lectura de su propia memoria."
+
+  identify_speaker:
+    decision: allow
+    min_phase: 1
+    reason: >-
+      Registrar con quién se habla es el paso previo a recordar nada útil.
+      Pedir permiso aquí rompería la conversación justo al presentarse.
+
+  forget:
+    decision: ask
+    min_phase: 1
+    reason: "Borrado irreversible: siempre se confirma."

@@ -13,6 +13,10 @@ local_only  = false                   # true = nunca llamar a una API externa
 local_url   = "http://localhost:11434/v1"
 local_model = "qwen3:4b"              # debe soportar tools: `ollama show <modelo>`
 
+[agent]
+# Usuario principal. Su perfil se inyecta siempre, sin depender de la búsqueda.
+user = "Sadid"
+
 [budget]
 # Presupuestos por tarea. El agente los conoce y se autolimita.
 max_iterations   = 12
@@ -25,3 +29,4 @@ traces     = "var/traces"                # JSONL de auditoría
 memory_db  = "var/memory.db"
 permissions = "config/permissions.yaml"
 system_prompt = "config/prompts/system.md"
+identity_prompt = "config/prompts/identity.md"
