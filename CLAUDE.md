@@ -11,7 +11,15 @@ uv run pytest           # suite completa (debe correr sin API key ni GPU)
 uv run pytest -m needs_llm   # sólo las pruebas que necesitan un modelo real
 uv run ruff check --fix .    # lint
 uv run ruff format .         # formato
+
+nohup ollama serve &         # servidor local — ver docs/SETUP-LOCAL.md
+argos --local "mensaje"      # agente sin API key
+uv run python -m argos.evals qwen3:4b   # banco de tool-calling
 ```
+
+**La suite completa no debe necesitar nunca API key, GPU ni servidor.** `tests/conftest.py`
+aísla el entorno: ignora tu `.env` y las variables `ARGOS_*`, para que una prueba no dependa
+de la máquina ni pueda gastar dinero real si encuentra una credencial.
 
 ## Principio rector: el LLM nunca cierra un lazo de control
 
