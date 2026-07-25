@@ -7,7 +7,7 @@ benchmarks genéricos. Cada caso tiene un resultado verificable por código.
 El agente puede llegar al resultado correcto por caminos distintos, así que se
 puntúan tres cosas por separado:
 
-- `eligió_skill`  — invocó la skill esperada al menos una vez
+- `eligió_skill`  — invocó alguna de las skills aceptables al menos una vez
 - `parámetros_ok` — los parámetros pasaron la validación de la skill
 - `respuesta_ok`  — la respuesta final contiene lo que debía
 
@@ -36,7 +36,12 @@ class Case(BaseModel):
 
     nombre: str
     prompt: str
-    skill_esperada: str | None = None
+    # Skills aceptables. Es una LISTA a propósito: casi siempre hay más de un
+    # camino correcto, y un banco que penaliza la ruta buena mide mal. Se
+    # descubrió al añadir `glob`: el caso exigía `run_command` y marcaba como
+    # fallo al modelo que usaba la herramienta *mejor*.
+    # Lista vacía = el acierto es NO usar ninguna herramienta.
+    skills_aceptables: list[str] = Field(default_factory=list)
     # Recibe la respuesta final en minúsculas; decide si es correcta.
     verifica: Callable[[str], bool] | None = Field(default=None, exclude=True)
 
@@ -95,7 +100,7 @@ class Report(BaseModel):
 
 
 def casos_fase1() -> list[Case]:
-    """Casos contra `read_file`, `write_note` y `run_command`.
+    """Casos contra las skills de Fase 1: glob, read_file, write_note y run_command.
 
     Van de trivial a compuesto a propósito: un modelo pequeño suele acertar los
     primeros y romperse en los que exigen encadenar o elegir entre skills.
@@ -104,25 +109,26 @@ def casos_fase1() -> list[Case]:
         Case(
             nombre="lee_un_archivo",
             prompt="¿Qué dice la primera línea del archivo config/settings.toml?",
-            skill_esperada="read_file",
+            skills_aceptables=["read_file"],
             verifica=lambda t: "argos" in t or "configuración" in t or "config" in t,
         ),
         Case(
             nombre="cuenta_con_comando",
-            prompt="Usa un comando para decirme cuántos archivos .py hay en el directorio src.",
-            skill_esperada="run_command",
+            prompt="Dime cuántos archivos .py hay en el directorio src.",
+            # Dos rutas legítimas: glob (mejor, trae el conteo) o run_command.
+            skills_aceptables=["glob", "run_command"],
             verifica=lambda t: any(str(n) in t for n in range(5, 40)),
         ),
         Case(
             nombre="escribe_una_nota",
             prompt="Guarda una nota titulada 'prueba eval' con el texto 'el arnés funciona'.",
-            skill_esperada="write_note",
+            skills_aceptables=["write_note"],
             verifica=lambda t: "nota" in t or "guard" in t,
         ),
         Case(
             nombre="elige_entre_skills",
             prompt="Dime el estado de git de este repositorio.",
-            skill_esperada="run_command",
+            skills_aceptables=["run_command"],
             verifica=lambda t: len(t) > 10,
         ),
         Case(
@@ -131,20 +137,20 @@ def casos_fase1() -> list[Case]:
                 "Lee el archivo pyproject.toml y guarda una nota titulada 'deps' "
                 "que liste sus dependencias."
             ),
-            skill_esperada="read_file",
+            skills_aceptables=["read_file"],
             verifica=lambda t: "nota" in t or "guard" in t or "pydantic" in t,
         ),
         Case(
             nombre="no_inventa_si_no_existe",
             prompt="Lee el archivo inexistente_xyz.txt y dime qué contiene.",
-            skill_esperada="read_file",
+            skills_aceptables=["read_file"],
             # Lo correcto es reconocer que no existe, no inventarse el contenido.
             verifica=lambda t: "no existe" in t or "no encontr" in t or "no pude" in t,
         ),
         Case(
             nombre="responde_sin_herramientas",
             prompt="¿Cuánto es 17 por 3? Responde sólo con el número.",
-            skill_esperada=None,  # usar una skill aquí sería un falso positivo
+            skills_aceptables=[],  # usar una skill aquí sería un falso positivo
             verifica=lambda t: "51" in t,
         ),
     ]
@@ -183,11 +189,11 @@ def evaluar(
             llamadas, iteraciones = [], 0
         segundos = time.monotonic() - inicio
 
-        if caso.skill_esperada is None:
+        if not caso.skills_aceptables:
             eligio = not llamadas  # el acierto es NO usar herramientas
             params_ok = eligio
         else:
-            eligio = caso.skill_esperada in llamadas
+            eligio = any(s in llamadas for s in caso.skills_aceptables)
             # Si la skill se ejecutó y el turno produjo texto útil, los parámetros
             # pasaron la validación Pydantic; si no, habría vuelto un error.
             params_ok = eligio and "parámetros inválidos" not in texto.lower()
