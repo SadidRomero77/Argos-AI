@@ -54,10 +54,12 @@ class RunCommandParams(BaseModel):
 class RunCommand(Skill):
     name = "run_command"
     description = (
-        "Ejecuta un comando de sólo lectura del sistema y devuelve su salida. Úsala "
-        "para inspeccionar el estado real (archivos, git, procesos) en vez de suponerlo. "
-        "El comando va como lista de argumentos, no como cadena de shell, y sólo se "
-        "permiten ejecutables de una lista blanca."
+        "Ejecuta UN comando de sólo lectura y devuelve su salida. Úsala para "
+        "inspeccionar el estado real del sistema (git, procesos, metadatos) en vez "
+        "de suponerlo. El comando va como lista de argumentos: ['git', 'status']. "
+        "NO hay shell, así que las tuberías, redirecciones y '&&' no funcionan — si "
+        "necesitabas 'find ... | wc -l', usa la herramienta glob, que ya devuelve el "
+        "conteo. Sólo se permiten ejecutables de una lista blanca."
     )
     Params = RunCommandParams
 
