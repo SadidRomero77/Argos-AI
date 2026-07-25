@@ -1,0 +1,74 @@
+# Política de permisos de ARGOS. Se evalúa SIEMPRE en el orden: deny -> ask -> allow.
+#
+# Principio "Least Agency" (OWASP Top 10 for Agentic Applications 2026):
+# la autonomía es una capacidad que se GANA, no un valor por defecto.
+#
+# Dos controles independientes, y ambos deben pasar:
+#   1. `phase`     — fase del proyecto actualmente habilitada. Una skill cuya
+#                    `min_phase` sea mayor queda DENEGADA aunque su regla diga allow.
+#                    Esto impide que una skill de hardware sea invocable en Fase 1.
+#   2. `decision`  — allow | ask | deny por skill.
+#
+# Al añadir una skill nueva NO se le pone `allow` sin una decisión explícita:
+# lo que no está listado cae al `default`, que es `ask`.
+
+default: ask
+phase: 1 # fase habilitada hoy. Subir sólo cuando la fase esté verificada.
+
+skills:
+  # ── Fase 1: sin hardware, sin efectos externos ──────────────────────────
+  read_file:
+    decision: allow
+    min_phase: 1
+    reason: "Lectura confinada a la raíz del proyecto; sin efectos secundarios."
+
+  write_note:
+    decision: allow
+    min_phase: 1
+    reason: "Escribe sólo en var/notes/, reversible."
+
+  search_web:
+    decision: ask
+    min_phase: 1
+    reason: "Sale a internet: coste, y el resultado es contenido NO confiable."
+
+  run_command:
+    decision: ask
+    min_phase: 1
+    reason: "Ejecución de código. Allowlist en la skill; la aprobación es la segunda barrera."
+
+  # ── Fase 2: visión e identidad ──────────────────────────────────────────
+  see_screen:
+    decision: ask
+    min_phase: 2
+    reason: "Puede capturar información sensible en pantalla."
+
+  remember_person:
+    decision: ask
+    min_phase: 2
+    reason: "Persiste un identificador biométrico. Requiere consentimiento explícito."
+
+  forget_person:
+    decision: allow
+    min_phase: 2
+    reason: "Borrar datos personales nunca debe tener fricción."
+
+  # ── Fase 4: hardware. Denegadas hasta que la fase esté verificada ───────
+  move:
+    decision: ask
+    min_phase: 4
+    reason: "Movimiento físico. Arranca en `ask` incluso con la Fase 4 habilitada."
+
+  turn:
+    decision: ask
+    min_phase: 4
+
+  look_at:
+    decision: allow
+    min_phase: 4
+    reason: "Servo de cámara: bajo riesgo, sin desplazamiento del chasis."
+
+  stop:
+    decision: allow
+    min_phase: 4
+    reason: "Detenerse SIEMPRE se permite. Nunca pedir permiso para frenar."
