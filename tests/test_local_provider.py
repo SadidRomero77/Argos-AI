@@ -333,3 +333,30 @@ def test_en_modo_local_no_hace_falta_api_key(monkeypatch):
     assert settings.anthropic_api_key is None
 
     ModelRouter.from_settings(settings=settings)  # no debe lanzar
+
+
+def test_la_peticion_lleva_num_ctx_para_ollama():
+    """El default de Ollama (4096) lo agota un agente de inmediato.
+
+    Al desbordar, el servidor trunca por el principio y el modelo pierde su
+    prompt de sistema sin emitir ningún error: el fallo se manifiesta como un
+    agente que "se vuelve tonto" a mitad de la tarea.
+    """
+    capturadas: list = []
+    cliente = responder(
+        {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}, capturadas
+    )
+    LocalProvider("qwen3:4b", num_ctx=16384, client=cliente).complete(
+        [{"role": "user", "content": "hola"}]
+    )
+    assert capturadas[0]["options"]["num_ctx"] == 16384
+
+
+def test_num_ctx_none_no_manda_options():
+    """llama.cpp la ignora, pero no ensuciamos la petición si se desactiva."""
+    capturadas: list = []
+    cliente = responder(
+        {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}, capturadas
+    )
+    LocalProvider("m", num_ctx=None, client=cliente).complete([{"role": "user", "content": "x"}])
+    assert "options" not in capturadas[0]

@@ -10,7 +10,12 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from argos.config import Settings
-from argos.harness.loop import AgentLoop, StopReason, wrap_external
+from argos.harness.loop import (
+    AgentLoop,
+    StopReason,
+    looks_like_text_tool_call,
+    wrap_external,
+)
 from argos.harness.permissions import Decision, PermissionGate, PermissionPolicy, SkillRule
 from argos.models.base import LLMProvider, LLMResponse, TaskKind, ToolCall, Usage
 from argos.models.router import ModelRouter
@@ -330,3 +335,59 @@ def test_un_turno_limpio_no_emite_evento_de_presupuesto(tmp_path, monkeypatch):
     loop.run("hola")
 
     assert "budget" not in [linea["event"] for linea in tracer.read_all()]
+
+
+# ─────────── corrección de llamadas escritas como texto (modelos débiles) ──────
+
+
+def test_detecta_una_llamada_escrita_como_texto():
+    """Observado con qwen3:4b: describe la llamada en vez de emitirla."""
+    texto_modelo = (
+        'Debes ejecutar:\n```json\n{"tool": "run_command", "arguments": ["find", "src"]}\n```'
+    )
+    assert looks_like_text_tool_call(texto_modelo, ["run_command", "eco"]) == "run_command"
+
+
+def test_no_se_dispara_con_prosa_que_menciona_una_skill():
+    """Hablar de una skill no es invocarla; sobre-disparar rompería respuestas válidas."""
+    assert looks_like_text_tool_call("Podría usar run_command para eso.", ["run_command"]) is None
+    assert looks_like_text_tool_call("El resultado es {a: 1}", ["run_command"]) is None
+
+
+def test_no_se_dispara_si_la_skill_no_esta_registrada():
+    texto_modelo = '{"tool": "lanzar_misiles", "arguments": {}}'
+    assert looks_like_text_tool_call(texto_modelo, ["run_command"]) is None
+
+
+def test_el_bucle_corrige_y_el_modelo_reintenta_bien():
+    respuesta_mala = texto('{"tool": "eco", "arguments": {"texto": "hola"}}')
+    loop, provider = build(
+        respuesta_mala,
+        pide_tools(ToolCall(id="t1", name="eco", params={"texto": "hola"})),
+        texto("ya está"),
+    )
+    result = loop.run("usa eco")
+
+    assert result.nudges == 1
+    assert result.skill_calls == ["eco"]
+    assert result.text == "ya está"
+    # La corrección llega como mensaje de usuario, no como system.
+    correccion = provider.peticiones[1][-1]
+    assert correccion["role"] == "user"
+    assert "no la has ejecutado" in correccion["content"]
+
+
+def test_solo_corrige_una_vez_por_turno():
+    """Insistir con un modelo que no sabe hacerlo sólo quema iteraciones."""
+    mala = texto('{"tool": "eco", "arguments": {}}')
+    loop, provider = build(mala, mala, mala, mala)
+    result = loop.run("usa eco")
+
+    assert result.nudges == 1
+    assert result.stopped_because is StopReason.COMPLETED
+    assert len(provider.peticiones) == 2  # original + un reintento, no más
+
+
+def test_un_turno_normal_no_genera_correcciones():
+    loop, _ = build(texto("respuesta normal sin json"))
+    assert loop.run("hola").nudges == 0

@@ -42,10 +42,45 @@ class TurnResult(BaseModel):
     usd: float = 0.0
     stopped_because: StopReason = StopReason.COMPLETED
     skill_calls: list[str] = Field(default_factory=list)
+    # Veces que hubo que corregir al modelo por describir una llamada en vez
+    # de emitirla. Es una métrica de calidad del modelo, no un error del turno.
+    nudges: int = 0
 
     @property
     def ok(self) -> bool:
         return self.stopped_because is StopReason.COMPLETED
+
+
+# Señales de que el modelo está *describiendo* una llamada en vez de emitirla.
+_SENALES_LLAMADA = ("arguments", "tool_call", "parameters", '"tool"', "input_schema")
+
+
+def looks_like_text_tool_call(text: str, skill_names: list[str]) -> str | None:
+    """Detecta una llamada a skill escrita como texto. Devuelve el nombre, o None.
+
+    Modo de fallo habitual en modelos pequeños: en vez de usar el canal de
+    function-calling, escriben algo como
+
+        ```json
+        {"tool": "run_command", "arguments": ["ls"]}
+        ```
+
+    Sin esto el bucle lo toma por la respuesta final y cierra el turno con la
+    tarea sin hacer — que es exactamente lo que se observó con qwen3:4b.
+
+    La detección es deliberadamente estrecha: exige el nombre de una skill
+    registrada, una llave de apertura y una palabra propia de una invocación.
+    Hablar de una skill en prosa no debe dispararla.
+    """
+    if "{" not in text:
+        return None
+    bajo = text.lower()
+    if not any(senal in bajo for senal in _SENALES_LLAMADA):
+        return None
+    for nombre in skill_names:
+        if nombre in text:
+            return nombre
+    return None
 
 
 def wrap_external(skill: str, content: str) -> str:
@@ -93,6 +128,7 @@ class AgentLoop:
         messages.append({"role": "user", "content": user_message})
 
         result = TurnResult()
+        nudged = False
         tools = self.registry.tool_definitions()
         max_iter = self.settings.budget.max_iterations
         max_tokens_tarea = self.settings.budget.max_tokens_task
@@ -129,6 +165,28 @@ class AgentLoop:
             messages.append({"role": "assistant", "content": response.raw_content or response.text})
 
             if not response.wants_tools:
+                # Antes de dar el turno por terminado: ¿escribió la llamada como
+                # texto en vez de emitirla? Se corrige UNA vez; insistir con un
+                # modelo que no sabe hacerlo sólo quema iteraciones.
+                if not nudged and (
+                    skill := looks_like_text_tool_call(response.text, self.registry.names)
+                ):
+                    nudged = True
+                    result.nudges += 1
+                    if self.tracer is not None:
+                        self.tracer.emit(Event.NUDGE, skill=skill, text=response.text[:300])
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Has descrito una llamada a '{skill}' como texto, pero no la "
+                                "has ejecutado. Invócala de verdad usando el mecanismo de "
+                                "herramientas; no escribas la llamada en tu respuesta."
+                            ),
+                        }
+                    )
+                    continue
+
                 result.stopped_because = StopReason.COMPLETED
                 break
 

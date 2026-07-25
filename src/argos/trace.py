@@ -60,6 +60,7 @@ class Event(StrEnum):
     PERMISSION = "permission"
     SKILL_CALL = "skill_call"
     SKILL_RESULT = "skill_result"
+    NUDGE = "nudge"
     BUDGET = "budget"
     ERROR = "error"
 
