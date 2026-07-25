@@ -44,7 +44,10 @@ function connect() {
     setTimeout(connect, 2000);   // reconexión: el servidor se reinicia a menudo en desarrollo
   };
 
+  ws.binaryType = "arraybuffer";
   ws.onmessage = (ev) => {
+    // Los frames binarios son audio de voz: llegan justo tras un "speak_audio".
+    if (ev.data instanceof ArrayBuffer) return playAudio(ev.data);
     const m = JSON.parse(ev.data);
     switch (m.type) {
       case "ready":
@@ -69,6 +72,8 @@ function connect() {
         if (m.nudges) addMsg("sys", `hubo que corregir al modelo ${m.nudges} vez(ces)`);
         break;
       case "speak": if ($("speak").checked) speak(m.text); break;
+      case "speak_audio": pendingMime = m.mime; break;
+      case "speaker": $("t-speaker").textContent = m.name; break;
       case "providers": renderProviders(m.items); break;
       case "permission": askPermission(m); break;
       case "notice": addMsg("sys", m.message); break;
@@ -82,6 +87,20 @@ function send(obj) { if (ws?.readyState === 1) ws.send(JSON.stringify(obj)); }
 // ─────────────────────────── voz de salida ───────────────────────────
 // Web Speech API: voces locales del sistema. Sin red, sin VRAM.
 // Kokoro entrará aquí cuando haya espeak-ng disponible.
+
+// El audio del servidor (edge-tts) suena mucho mejor que la voz del navegador.
+// Ésta queda como respaldo si el TTS remoto falla o está desactivado.
+let pendingMime = "audio/mpeg", player = null;
+
+function playAudio(buffer) {
+  if (!$("speak").checked) return;
+  speechSynthesis?.cancel();
+  player?.pause();
+  const url = URL.createObjectURL(new Blob([buffer], { type: pendingMime }));
+  player = new Audio(url);
+  player.onended = () => URL.revokeObjectURL(url);
+  player.play().catch(() => addMsg("sys", "el navegador bloqueó la reproducción; haz clic en la página"));
+}
 
 function speak(text) {
   if (!window.speechSynthesis) return;

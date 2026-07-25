@@ -141,7 +141,25 @@ class AgentLoop:
         return [
             {"type": "text", "text": self.system_prompt, "cache_control": {"type": "ephemeral"}},
             {"type": "text", "text": extra},
+            # Ancla final. En un modelo pequeño lo último pesa más, y con el
+            # contexto de memoria al final el agente empezaba a describirse con
+            # datos del proyecto en vez de con su identidad: preguntado por su
+            # nombre recitaba "soy un agente que se encarna en hardware por fases".
+            {"type": "text", "text": self.identity_anchor},
         ]
+
+    @property
+    def identity_anchor(self) -> str:
+        """Recordatorio corto de quién es, en la posición más saliente del prompt."""
+        return (
+            "Antes de responder: eres ARGOS. Tu nombre viene del perro de Odiseo, "
+            "el único que lo reconoció tras veinte años y bajo disfraz, y de Argos "
+            "Panoptes, el gigante de cien ojos que nunca duerme del todo. Reconocer "
+            "y vigilar es lo que haces.\n"
+            "Lo que sabes de TI está en tu identidad, no en tu memoria. La memoria "
+            "guarda lo que aprendes de otros. No confundas el proyecto que Sadid "
+            "construye con quién eres tú."
+        )
 
     def run(
         self,

@@ -16,6 +16,10 @@ local_model = "qwen3:4b"              # debe soportar tools: `ollama show <model
 [agent]
 # Usuario principal. Su perfil se inyecta siempre, sin depender de la búsqueda.
 user = "Sadid"
+# true  = voz neuronal de Edge: mucho mejor, pero el TEXTO sale a un servidor
+#         de Microsoft. Sólo lo que ARGOS dice en alto, no lo que razona.
+# false = voz del navegador: peor calidad, nada sale del equipo.
+voice = true
 
 [budget]
 # Presupuestos por tarea. El agente los conoce y se autolimita.

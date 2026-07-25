@@ -37,6 +37,7 @@ from argos.models.base import TaskKind
 from argos.models.providers import ProviderCatalog, ProviderKind, ProviderSpec
 from argos.models.router import ModelRouter
 from argos.perception.stt import SpeechToText
+from argos.perception.tts import BrowserTTS, EdgeTTS, TextToSpeech
 from argos.tools.registry import default_registry
 from argos.trace import Event, Tracer
 
@@ -96,6 +97,7 @@ class Hub:
         self.tracer = Tracer(settings=self.settings)
         self.catalog = ProviderCatalog(settings=self.settings)
         self.stt = SpeechToText()
+        self.tts: TextToSpeech = EdgeTTS() if self.settings.agent.voice else BrowserTTS()
         self.approver = WebApprover(self)
         self.gate = PermissionGate(
             approver=self.approver, tracer=self.tracer, settings=self.settings
@@ -234,8 +236,12 @@ class Hub:
                     partes.append(f"Reglas que aprendiste:\n{lineas}")
                 contexto = (
                     "<memoria>\n" + "\n\n".join(partes) + "\n</memoria>\n"
-                    "Eso es lo que sabes. Úsalo para responder con naturalidad, sin "
-                    "recitarlo: si no viene a cuento de lo que te preguntan, ignóralo."
+                    "Eso es lo que recuerdas SOBRE OTROS. Úsalo con naturalidad, sin "
+                    "recitarlo; si no viene a cuento, ignóralo.\n"
+                    "Tu memoria NO te describe a ti. Si te preguntan por ti —qué te "
+                    "gusta, quién eres, qué opinas— responde desde tu identidad, que "
+                    "ya conoces. Nunca busques en la memoria para hablar de ti mismo, "
+                    "y nunca digas que no tienes gustos ni opiniones."
                 )
             except Exception:
                 contexto = ""
@@ -403,6 +409,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
+async def _hablar(hub: Hub, texto: str) -> None:
+    """Genera la voz y la envía. Si falla, el navegador habla con la suya.
+
+    Un fallo de red en el TTS no debe dejar al agente mudo: se degrada a la voz
+    local del sistema en vez de perder la respuesta hablada.
+    """
+    try:
+        voz = await hub.tts.synth(texto)
+    except Exception as exc:
+        hub.tracer.emit(Event.ERROR, where="tts", error=repr(exc))
+        voz = None
+
+    if voz is not None and not voz.is_empty:
+        await hub.send({"type": "speak_audio", "mime": voz.mime, "chars": voz.chars})
+        for ws in list(hub.clients):
+            try:
+                await ws.send_bytes(voz.audio)
+            except Exception:
+                hub.clients.discard(ws)
+    else:
+        # Sin audio: que hable el navegador con sus voces locales.
+        await hub.send({"type": "speak", "text": texto})
+
+
 async def _procesar(hub: Hub, texto: str, hablar: bool) -> None:
     if hub._busy:
         await hub.send({"type": "notice", "message": "Estoy con la petición anterior."})
@@ -418,7 +448,7 @@ async def _procesar(hub: Hub, texto: str, hablar: bool) -> None:
         await hub.send({"type": "message", "role": "agent", "text": resultado["text"]})
         await hub.send({"type": "telemetry", **resultado})
         if hablar and resultado["text"]:
-            await hub.send({"type": "speak", "text": resultado["text"]})
+            await _hablar(hub, resultado["text"])
         await hub.set_state("en espera")
     except Exception as exc:
         hub.tracer.emit(Event.ERROR, where="procesar", error=repr(exc))

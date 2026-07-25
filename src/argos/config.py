@@ -33,6 +33,9 @@ class AgentSettings(BaseModel):
 
     # Su perfil se inyecta SIEMPRE en el contexto, no por búsqueda vectorial.
     user: str = "Sadid"
+    # true = voces neuronales de Edge (mejor calidad, el texto sale del equipo).
+    # false = síntesis del navegador (peor, pero nada sale de la máquina).
+    voice: bool = True
 
 
 class BudgetSettings(BaseModel):

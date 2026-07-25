@@ -67,11 +67,15 @@ SEMILLA: list[tuple[EntityKind, str, list[str]]] = [
             "es criollo, de raza mezclada",
         ],
     ),
+    # OJO con el nombre de este tema: llamarlo "ARGOS" hacía que el agente
+    # confundiera «¿quién eres?» con «¿qué es el proyecto?» y recitara la ficha
+    # técnica en vez de hablar de sí mismo. Quién es ARGOS vive en identity.md,
+    # no en la memoria: la memoria es para lo que aprende de los demás.
     (
         EntityKind.TEMA,
-        "ARGOS",
+        "el proyecto",
         [
-            "es este proyecto: un agente de IA autónomo que se encarna en hardware por fases",
+            "es un agente de IA autónomo que se encarna en hardware por fases",
             "su principio rector es que el LLM nunca cierra un lazo de control",
             "corre en local con qwen3:4b sobre Ollama, y puede usar Claude si se configura",
         ],
