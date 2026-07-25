@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ARGOS · HUD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=IBM+Plex+Sans:wght@300;400;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+<div class="hud">
+
+  <header class="hud-top">
+    <div class="brand">
+      <span class="brand-mark">◈</span>
+      <h1>ARGOS</h1>
+      <span class="brand-sub" id="brandSub">núcleo · fase 1</span>
+    </div>
+    <div class="nodes">
+      <div class="node" id="node-link"><i></i>ENLACE</div>
+      <div class="node" id="node-llm"><i></i>CEREBRO</div>
+      <div class="node" id="node-mem"><i></i>MEMORIA</div>
+      <div class="node" id="node-stt"><i></i>OÍDO</div>
+    </div>
+  </header>
+
+  <main class="stream" id="stream" aria-live="polite"></main>
+
+  <aside class="side">
+    <div class="core-wrap">
+      <canvas id="core" width="336" height="336" aria-hidden="true"></canvas>
+      <div class="core-state" id="coreState">conectando</div>
+    </div>
+
+    <div>
+      <h2>Telemetría</h2>
+      <dl>
+        <div><dt>Latencia</dt><dd id="t-lat">—</dd></div>
+        <div><dt>Proveedor</dt><dd id="t-prov">—</dd></div>
+        <div><dt>Tokens</dt><dd id="t-tok">—</dd></div>
+        <div><dt>Coste</dt><dd id="t-usd">—</dd></div>
+        <div><dt>Skills usadas</dt><dd id="t-skills">—</dd></div>
+        <div><dt>Recuerdos</dt><dd id="t-mem">—</dd></div>
+      </dl>
+    </div>
+
+    <div>
+      <h2>Atajos</h2>
+      <div class="chips">
+        <button class="chip" data-say="¿Cuántos archivos .py hay en src?">Contar archivos</button>
+        <button class="chip" data-say="Dime el estado de git de este repositorio.">Estado git</button>
+        <button class="chip" data-say="¿Qué recuerdas de nuestras conversaciones anteriores?">¿Qué recuerdas?</button>
+      </div>
+    </div>
+
+    <div>
+      <h2>Skills disponibles</h2>
+      <div class="chips" id="skills"></div>
+    </div>
+  </aside>
+
+  <footer class="command">
+    <button id="mic" class="mic" title="Mantén pulsado para hablar" aria-label="Hablar">
+      <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+    </button>
+    <input id="input" type="text" placeholder="Escribe, o mantén pulsado el micrófono para hablar…" autocomplete="off" maxlength="4000" />
+    <label class="toggle"><input type="checkbox" id="speak" checked /> voz</label>
+    <button id="gear" class="gear" title="Proveedores y claves">⚙</button>
+  </footer>
+</div>
+
+<dialog id="cfg">
+  <h3>Cerebro</h3>
+  <div class="prov-list" id="provList"></div>
+
+  <label>Clave de API
+    <input id="secretVal" type="password" placeholder="pega aquí la clave del proveedor seleccionado" />
+  </label>
+  <p class="hint">Se guarda sólo en esta máquina, en <code>var/secrets.json</code> con permisos 0600.
+  Nunca entra en git, ni en las trazas, ni en ningún prompt.</p>
+
+  <div class="row">
+    <button id="saveSecret">Guardar clave</button>
+    <button class="ghost" id="closeCfg">Cerrar</button>
+  </div>
+</dialog>
+
+<dialog id="perm">
+  <h3>Permiso</h3>
+  <p id="permText"></p>
+  <p class="hint" id="permWhy"></p>
+  <div class="row">
+    <button id="permYes">Permitir</button>
+    <button class="ghost" id="permNo">Denegar</button>
+  </div>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -32,6 +32,12 @@ lint() { uv run ruff check --fix .; uv run ruff format .; uv run ruff check .; }
 
 eval() { up; uv run python -m argos.evals "${@:-qwen3:4b}"; }
 
+ui() { # levanta el HUD web
+  up
+  echo "· HUD en http://localhost:8420  (Ctrl+C para parar)"
+  uv run uvicorn argos.gateway.server:app --host 0.0.0.0 --port 8420 "$@"
+}
+
 # Uso: ./dev ask "tu pregunta"
 ask() { up; uv run argos --local --approve ask "$@"; }
 
@@ -66,6 +72,7 @@ status() { # panorama en 10 segundos
 
 help() {
   cat <<'EOF'
+  ./dev ui              interfaz web en http://localhost:8420
   ./dev status          panorama del proyecto
   ./dev up | down       arrancar / parar el modelo local
   ./dev ask "..."       hablar con el agente (pide permiso por consola)
@@ -80,6 +87,6 @@ EOF
 
 cmd="${1:-help}"; shift || true
 case "$cmd" in
-  up|down|test|testall|lint|eval|ask|yolo|trace|status|help) "$cmd" "$@" ;;
+  up|down|test|testall|lint|eval|ask|yolo|trace|status|ui|help) "$cmd" "$@" ;;
   *) echo "comando desconocido: $cmd"; help; exit 1 ;;
 esac

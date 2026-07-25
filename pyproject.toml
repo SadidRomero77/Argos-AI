@@ -5,11 +5,14 @@ description = "Agente de IA autónomo encarnado progresivamente en hardware"
 requires-python = ">=3.12"
 dependencies = [
     "anthropic>=0.69",
+    "fastapi>=0.140.0",
+    "faster-whisper>=1.2.1",
     "httpx>=0.28.1",
     "numpy>=2.5.1",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "pyyaml>=6.0",
+    "uvicorn[standard]>=0.51.0",
 ]
 
 [project.scripts]
