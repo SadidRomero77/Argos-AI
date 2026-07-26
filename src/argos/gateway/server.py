@@ -36,6 +36,8 @@ from argos.memory.store import EntityKind, MemoryStore
 from argos.models.base import TaskKind
 from argos.models.providers import ProviderCatalog, ProviderKind, ProviderSpec
 from argos.models.router import ModelRouter
+from argos.perception.camera import CameraBridge
+from argos.perception.identity import FaceRecognizer
 from argos.perception.stt import SpeechToText
 from argos.perception.tts import BrowserTTS, EdgeTTS, TextToSpeech
 from argos.tools.registry import default_registry
@@ -118,11 +120,18 @@ class Hub:
             if entidad is not None:
                 self.speaker_id = entidad.id
 
+        # La visión es opcional: si el puente de cámara no está corriendo en
+        # Windows, el agente arranca igual y sin esas skills. Las preconditions
+        # comprueban el puente en cada uso, así que puede aparecer más tarde.
+        self.camera = CameraBridge()
+        self.recognizer = FaceRecognizer()
+
         self.registry = default_registry(
             gate=self.gate,
             tracer=self.tracer,
             memory=self.memory,
             on_identified=self.set_speaker,
+            vision=(self.camera, self.recognizer),
         )
         self.session = self.tracer.session_id
         self._history: list[dict[str, Any]] = []

@@ -85,6 +85,7 @@ def default_registry(
     tracer: Tracer | None = None,
     memory: Any = None,
     on_identified: Any = None,
+    vision: Any = None,
 ) -> SkillRegistry:
     """Registro con las skills de Fase 1 (sin hardware).
 
@@ -111,4 +112,15 @@ def default_registry(
         registry.register_all(Remember(memory), Recall(memory), Forget(memory))
         if on_identified is not None:
             registry.register(IdentifySpeaker(memory, on_identified))
+
+        # La visión necesita memoria: sin dónde guardar la cara no tiene sentido.
+        if vision is not None:
+            from argos.skills.vision import LookAround, RememberFace, WhoIsThis
+
+            camara, reconocedor = vision
+            registry.register_all(
+                WhoIsThis(memory, camara, reconocedor, on_identified),
+                RememberFace(memory, camara, reconocedor, on_identified),
+                LookAround(camara, reconocedor),
+            )
     return registry

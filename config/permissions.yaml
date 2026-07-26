@@ -114,3 +114,25 @@ skills:
     decision: ask
     min_phase: 1
     reason: "Borrado irreversible: siempre se confirma."
+
+  # ── Visión: la cámara es el sensor más invasivo que hay ─────────────────
+  look:
+    decision: allow
+    min_phase: 1
+    reason: >-
+      Sólo cuenta cuántas caras hay y en qué zona del encuadre. No identifica
+      a nadie ni saca la imagen del equipo.
+
+  who_is_this:
+    decision: allow
+    min_phase: 1
+    reason: >-
+      Compara contra caras ya enroladas con consentimiento. No enrola a nadie
+      nuevo, así que no puede crear un registro biométrico por su cuenta.
+
+  remember_face:
+    decision: ask
+    min_phase: 1
+    reason: >-
+      Persiste un identificador biométrico permanente. SIEMPRE se confirma:
+      un embedding facial es el rostro, no un dato anónimo.
