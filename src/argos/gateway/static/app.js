@@ -69,6 +69,7 @@ function connect() {
         $("t-skills").textContent = m.skills.length ? m.skills.join(", ") : "—";
         $("t-mem").textContent = m.recalled ? "recuperados" : "sin contexto";
         node("node-mem", m.recalled);
+        reflejarMirada(m.skills || []);
         if (m.nudges) addMsg("sys", `hubo que corregir al modelo ${m.nudges} vez(ces)`);
         break;
       case "speak": if ($("speak").checked) speak(m.text); break;
@@ -189,6 +190,42 @@ $("input").addEventListener("keydown", (e) => {
 document.querySelectorAll("[data-say]").forEach(b =>
   b.addEventListener("click", () => send({ type: "text", content: b.dataset.say, speak: $("speak").checked }))
 );
+
+// ─────────────────────────── cámara ───────────────────────────
+// Apagada por defecto: encender la webcam es una decisión, no un default.
+// El refresco es lento a propósito — esto es para VER lo que ve el agente,
+// no para hacer videollamadas, y cada fotograma son ~230 KB.
+
+let camTimer = null;
+
+function camOn() {
+  document.querySelector(".cam-wrap").classList.add("live");
+  $("cam").classList.add("on");
+  $("camToggle").textContent = "apagar";
+  const tick = () => { $("cam").src = `/api/frame.jpg?t=${Date.now()}`; };
+  tick();
+  camTimer = setInterval(tick, 1000);
+}
+
+function camOff() {
+  clearInterval(camTimer); camTimer = null;
+  document.querySelector(".cam-wrap").classList.remove("live");
+  $("cam").classList.remove("on");
+  $("cam").removeAttribute("src");
+  $("camToggle").textContent = "activar";
+}
+
+$("camToggle").addEventListener("click", () => (camTimer ? camOff() : camOn()));
+$("cam").addEventListener("error", () => {
+  if (!camTimer) return;
+  camOff();
+  addMsg("sys", "no hay cámara: arranca el puente en Windows con camera_bridge.py");
+});
+
+// Cuando el agente mira, se enciende el panel para que se vea lo mismo que él.
+function reflejarMirada(skills) {
+  if (!camTimer && skills.some(s => ["look", "who_is_this", "remember_face"].includes(s))) camOn();
+}
 
 // ─────────────────────────── proveedores ───────────────────────────
 

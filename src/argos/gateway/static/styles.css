@@ -199,3 +199,24 @@ dialog button.ghost { background: transparent; color: var(--dim); border: 1px so
   .hud { grid-template-columns: 1fr; grid-template-areas: "top" "stream" "cmd"; }
   .side { display: none; }
 }
+
+/* ── panel de cámara ── */
+.side h2 { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cam-wrap {
+  position: relative; width: 100%; aspect-ratio: 16/9;
+  border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: #000;
+}
+#cam { width: 100%; height: 100%; object-fit: cover; display: none; }
+#cam.on { display: block; }
+.cam-off {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-family: var(--mono); font-size: 10px; color: var(--dim); letter-spacing: .1em;
+}
+.cam-wrap.live { border-color: var(--accent); }
+.cam-wrap.live .cam-off { display: none; }
+/* Testigo de captura: deja claro cuándo la cámara está encendida de verdad. */
+.cam-wrap.live::after {
+  content: ""; position: absolute; top: 7px; right: 7px;
+  width: 7px; height: 7px; border-radius: 50%; background: var(--err);
+  box-shadow: 0 0 7px var(--err); animation: pulse 1.6s ease-in-out infinite;
+}

@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from argos.config import Settings, get_settings
@@ -305,6 +305,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/")
     async def index() -> FileResponse:
         return FileResponse(STATIC / "index.html")
+
+    @app.get("/api/frame.jpg")
+    async def frame() -> Response:
+        """Reexpone el fotograma al HUD.
+
+        El navegador no puede ir al puente directamente: el token vive en WSL, no
+        en el navegador, y mandárselo sería filtrarlo a cualquier pestaña. El
+        gateway hace de intermediario y el token no sale de aquí.
+        """
+        try:
+            imagen = await asyncio.to_thread(hub.camera.grab)
+        except Exception as exc:
+            return Response(f"sin cámara: {exc}", status_code=503, media_type="text/plain")
+        if imagen.is_empty:
+            return Response("sin cámara", status_code=503, media_type="text/plain")
+        return Response(imagen.jpeg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
