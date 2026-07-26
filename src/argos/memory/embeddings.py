@@ -75,7 +75,17 @@ class OllamaEmbedder:
             return np.zeros((0, self._dimensions or 0), dtype=np.float32)
 
         respuesta = self._client.post(
-            f"{self.base_url}/api/embed", json={"model": self.model, "input": texts}
+            f"{self.base_url}/api/embed",
+            json={
+                "model": self.model,
+                "input": texts,
+                # A CPU a propósito. En GPU ocupa 664 MB permanentes, y con 4,5 GB
+                # útiles eso decide si el cerebro y el modelo de visión caben a la
+                # vez o si Ollama tiene que intercambiarlos en cada pregunta
+                # visual — que cuesta minuto y medio. Embeder es rápido y ocurre
+                # pocas veces: es el mejor sitio del sistema para ceder GPU.
+                "options": {"num_gpu": 0},
+            },
         )
         respuesta.raise_for_status()
         vectores = respuesta.json().get("embeddings") or []
