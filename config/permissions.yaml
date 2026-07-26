@@ -136,3 +136,20 @@ skills:
     reason: >-
       Persiste un identificador biométrico permanente. SIEMPRE se confirma:
       un embedding facial es el rostro, no un dato anónimo.
+
+  see:
+    decision: allow
+    min_phase: 1
+    reason: >-
+      Describe lo que hay delante con un modelo LOCAL. La imagen no sale del
+      equipo, así que el riesgo es el mismo que el de `look`.
+
+  count_fingers:
+    decision: allow
+    min_phase: 1
+    reason: "Geometría de la mano; ni identifica ni guarda nada."
+
+  read_expression:
+    decision: allow
+    min_phase: 1
+    reason: "Geometría de la cara; no produce ni almacena identificador biométrico."

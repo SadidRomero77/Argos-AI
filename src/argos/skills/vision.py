@@ -30,7 +30,9 @@ from pydantic import BaseModel, Field
 
 from argos.memory.store import EntityKind, MemoryStore
 from argos.perception.camera import CameraBridge
+from argos.perception.hands import ExpressionReader, HandCounter
 from argos.perception.identity import UMBRAL, FaceRecognizer
+from argos.perception.vlm import VisionLanguageModel
 from argos.skills.base import Skill, SkillResult
 
 
@@ -206,4 +208,161 @@ class LookAround(Skill):
         cuantas = "una persona" if len(caras) == 1 else f"{len(caras)} personas"
         return SkillResult.success(
             f"Veo {cuantas}: " + "; ".join(descripciones) + ".", faces=len(caras)
+        )
+
+
+class SeeParams2(BaseModel):
+    question: str = Field(
+        description=(
+            "Qué quieres saber de la imagen, EN INGLÉS y en una frase corta. "
+            "Ej.: 'What is the person holding?', 'What color is the shirt?'"
+        )
+    )
+
+
+class See(Skill):
+    """Pregunta abierta sobre lo que hay delante de la cámara."""
+
+    name = "see"
+    description = (
+        "[see] Mira por la cámara y responde una pregunta sobre lo que hay: objetos, "
+        "colores, qué sostiene alguien, cómo es el sitio. La pregunta va EN INGLÉS "
+        "porque el modelo de visión sólo entiende ese idioma — tú traduces la "
+        "respuesta al español. Para contar dedos usa `count_fingers` y para saber si "
+        "alguien sonríe usa `read_expression`: son exactos, esto es una descripción "
+        "y puede equivocarse."
+    )
+    Params = SeeParams2
+
+    def __init__(self, camera: CameraBridge, vlm: VisionLanguageModel) -> None:
+        self.camera = camera
+        self.vlm = vlm
+
+    def precondition(self, params: SeeParams2) -> str | None:
+        ok, mensaje = self.camera.health()
+        if not ok:
+            return mensaje
+        ok, mensaje = self.vlm.health()
+        return None if ok else mensaje
+
+    # Por debajo de esto la respuesta es un fragmento, no una respuesta.
+    _MINIMO_PALABRAS = 4
+
+    def run(self, params: SeeParams2) -> SkillResult:
+        jpeg = self.camera.grab().jpeg
+        respuesta = self.vlm.ask(jpeg, params.question)
+        texto = respuesta.text
+
+        # Moondream contesta con fragmentos a preguntas específicas ("urns") pero
+        # describe bien la escena entera. Cuando la respuesta se queda en dos
+        # palabras se le pide además la descripción general, para que el agente
+        # tenga contexto con el que responder en vez de repetir el fragmento.
+        completado = False
+        if len(texto.split()) < self._MINIMO_PALABRAS:
+            general = self.vlm.describe(jpeg)
+            if not general.is_empty:
+                texto = f"{texto}. En la escena: {general.text}" if texto else general.text
+                completado = True
+
+        if not texto.strip():
+            return SkillResult.success(
+                "El modelo de visión no supo responder a eso. Prueba con una pregunta "
+                "más simple, o pídele que describa la escena entera.",
+                answered=False,
+            )
+
+        # Sin prefijos explicativos: cualquier envoltorio acaba copiado literalmente
+        # en la respuesta al usuario. El agente ya sabe que esto viene de la cámara.
+        return SkillResult.success(
+            texto, answered=True, seconds=respuesta.seconds, completed=completado
+        )
+
+
+class CountFingers(Skill):
+    """Conteo exacto por geometría. Sin modelo de lenguaje de por medio."""
+
+    name = "count_fingers"
+    description = (
+        "[count_fingers] Cuenta cuántos dedos está mostrando quien está delante de la "
+        "cámara, y reconoce gestos como el puño o la señal de victoria. El conteo es "
+        "EXACTO: se calcula con los puntos de la mano, no lo estima ningún modelo. "
+        "Úsala siempre para contar dedos — nunca lo deduzcas mirando la escena."
+    )
+    Params = SinParams
+
+    def __init__(self, camera: CameraBridge, counter: HandCounter) -> None:
+        self.camera = camera
+        self.counter = counter
+
+    def precondition(self, params: SinParams) -> str | None:
+        ok, mensaje = self.camera.health()
+        if not ok:
+            return mensaje
+        ok, mensaje = self.counter.health()
+        return None if ok else mensaje
+
+    def run(self, params: SinParams) -> SkillResult:
+        manos = self.counter.count(self.camera.grab().jpeg)
+        if not manos:
+            return SkillResult.success(
+                "No veo ninguna mana delante de la cámara.".replace("mana", "mano"), hands=0
+            )
+
+        partes = []
+        for mano in manos:
+            texto = f"{mano.fingers} dedo{'s' if mano.fingers != 1 else ''}"
+            if mano.gesture:
+                texto += f" ({mano.gesture})"
+            partes.append(texto)
+
+        total = sum(m.fingers for m in manos)
+        salida = " y ".join(partes)
+        if len(manos) > 1:
+            salida += f". En total, {total}"
+        return SkillResult.success(
+            salida + ".",
+            hands=len(manos),
+            total=total,
+            gestures=[m.gesture for m in manos if m.gesture],
+        )
+
+
+class ReadExpression(Skill):
+    """Sonrisa, ojos y boca por blendshapes faciales. También determinista."""
+
+    name = "read_expression"
+    description = (
+        "[read_expression] Dice si quien está delante sonríe, tiene los ojos cerrados "
+        "o la boca abierta. Se calcula con la geometría de la cara, así que es fiable. "
+        "Úsala cuando pregunten por la expresión — no la deduzcas de una descripción."
+    )
+    Params = SinParams
+
+    def __init__(self, camera: CameraBridge, reader: ExpressionReader) -> None:
+        self.camera = camera
+        self.reader = reader
+
+    def precondition(self, params: SinParams) -> str | None:
+        ok, mensaje = self.camera.health()
+        if not ok:
+            return mensaje
+        ok, mensaje = self.reader.health()
+        return None if ok else mensaje
+
+    def run(self, params: SinParams) -> SkillResult:
+        expresion = self.reader.read(self.camera.grab().jpeg)
+        if expresion is None:
+            return SkillResult.success("No veo ninguna cara delante de la cámara.", face=False)
+
+        rasgos = ["sonriendo" if expresion.smiling else "sin sonreír"]
+        if expresion.eyes_closed:
+            rasgos.append("con los ojos cerrados")
+        if expresion.mouth_open:
+            rasgos.append("con la boca abierta")
+
+        return SkillResult.success(
+            "Está " + ", ".join(rasgos) + ".",
+            face=True,
+            smiling=expresion.smiling,
+            smile_score=expresion.smile_score,
         )

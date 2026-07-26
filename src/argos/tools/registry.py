@@ -115,12 +115,22 @@ def default_registry(
 
         # La visión necesita memoria: sin dónde guardar la cara no tiene sentido.
         if vision is not None:
-            from argos.skills.vision import LookAround, RememberFace, WhoIsThis
+            from argos.skills.vision import (
+                CountFingers,
+                LookAround,
+                ReadExpression,
+                RememberFace,
+                See,
+                WhoIsThis,
+            )
 
-            camara, reconocedor = vision
+            camara, reconocedor, vlm, manos, expresion = vision
             registry.register_all(
                 WhoIsThis(memory, camara, reconocedor, on_identified),
                 RememberFace(memory, camara, reconocedor, on_identified),
                 LookAround(camara, reconocedor),
+                See(camara, vlm),
+                CountFingers(camara, manos),
+                ReadExpression(camara, expresion),
             )
     return registry

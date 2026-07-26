@@ -37,9 +37,11 @@ from argos.models.base import TaskKind
 from argos.models.providers import ProviderCatalog, ProviderKind, ProviderSpec
 from argos.models.router import ModelRouter
 from argos.perception.camera import CameraBridge
+from argos.perception.hands import ExpressionReader, HandCounter
 from argos.perception.identity import FaceRecognizer
 from argos.perception.stt import SpeechToText
 from argos.perception.tts import BrowserTTS, EdgeTTS, TextToSpeech
+from argos.perception.vlm import VisionLanguageModel
 from argos.tools.registry import default_registry
 from argos.trace import Event, Tracer
 
@@ -125,13 +127,16 @@ class Hub:
         # comprueban el puente en cada uso, así que puede aparecer más tarde.
         self.camera = CameraBridge()
         self.recognizer = FaceRecognizer()
+        self.vlm = VisionLanguageModel()
+        self.hands = HandCounter()
+        self.expression = ExpressionReader()
 
         self.registry = default_registry(
             gate=self.gate,
             tracer=self.tracer,
             memory=self.memory,
             on_identified=self.set_speaker,
-            vision=(self.camera, self.recognizer),
+            vision=(self.camera, self.recognizer, self.vlm, self.hands, self.expression),
         )
         self.session = self.tracer.session_id
         self._history: list[dict[str, Any]] = []
