@@ -1,4 +1,4 @@
-active: local-8b
+active: local
 providers:
 - name: local
   kind: openai
