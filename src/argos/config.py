@@ -28,6 +28,16 @@ class ModelSettings(BaseModel):
     local_model: str = "qwen3:4b"
 
 
+class AgentSettings(BaseModel):
+    """Con quién habla el agente por defecto."""
+
+    # Su perfil se inyecta SIEMPRE en el contexto, no por búsqueda vectorial.
+    user: str = "Sadid"
+    # true = voces neuronales de Edge (mejor calidad, el texto sale del equipo).
+    # false = síntesis del navegador (peor, pero nada sale de la máquina).
+    voice: bool = True
+
+
 class BudgetSettings(BaseModel):
     """Límites por tarea. El agente los ve y se autolimita en vez de ser cortado."""
 
@@ -42,6 +52,7 @@ class PathSettings(BaseModel):
     memory_db: Path = Path("var/memory.db")
     permissions: Path = Path("config/permissions.yaml")
     system_prompt: Path = Path("config/prompts/system.md")
+    identity_prompt: Path = Path("config/prompts/identity.md")
 
     def resolved(self, field: str) -> Path:
         """Ruta absoluta, anclada a la raíz del repo si venía relativa."""
@@ -76,6 +87,7 @@ class Settings(BaseSettings):
     )
 
     models: ModelSettings = Field(default_factory=ModelSettings)
+    agent: AgentSettings = Field(default_factory=AgentSettings)
     budget: BudgetSettings = Field(default_factory=BudgetSettings)
     paths: PathSettings = Field(default_factory=PathSettings)
 

@@ -81,12 +81,56 @@ class SkillRegistry:
 
 
 def default_registry(
-    gate: PermissionGate | None = None, tracer: Tracer | None = None
+    gate: PermissionGate | None = None,
+    tracer: Tracer | None = None,
+    memory: Any = None,
+    on_identified: Any = None,
+    vision: Any = None,
 ) -> SkillRegistry:
-    """Registro con las skills de Fase 1 (sin hardware)."""
+    """Registro con las skills de Fase 1 (sin hardware).
+
+    `memory` es opcional: sin almacén no se registran las skills de memoria, y el
+    agente sigue funcionando — sin continuidad, pero funcionando.
+
+    `on_identified(nombre, entity_id)` se invoca cuando el agente descubre con
+    quién habla. Lo usa el gateway para asociar los episodios a esa persona; en
+    Fase 2 lo llamará también el reconocimiento facial.
+    """
     from argos.skills.fs import Glob, ReadFile, WriteNote
     from argos.skills.shell import RunCommand
+    from argos.skills.weather import Weather
+    from argos.skills.web import FetchUrl, SearchWeb
 
     registry = SkillRegistry(gate=gate, tracer=tracer)
-    registry.register_all(Glob(), ReadFile(), WriteNote(), RunCommand())
+    registry.register_all(
+        Glob(), ReadFile(), WriteNote(), RunCommand(), Weather(), SearchWeb(), FetchUrl()
+    )
+
+    if memory is not None:
+        from argos.skills.memory import Forget, IdentifySpeaker, Recall, Remember
+
+        registry.register_all(Remember(memory), Recall(memory), Forget(memory))
+        if on_identified is not None:
+            registry.register(IdentifySpeaker(memory, on_identified))
+
+        # La visión necesita memoria: sin dónde guardar la cara no tiene sentido.
+        if vision is not None:
+            from argos.skills.vision import (
+                CountFingers,
+                LookAround,
+                ReadExpression,
+                RememberFace,
+                See,
+                WhoIsThis,
+            )
+
+            camara, reconocedor, vlm, manos, expresion = vision
+            registry.register_all(
+                WhoIsThis(memory, camara, reconocedor, on_identified),
+                RememberFace(memory, camara, reconocedor, on_identified),
+                LookAround(camara, reconocedor),
+                See(camara, vlm),
+                CountFingers(camara, manos),
+                ReadExpression(camara, expresion),
+            )
     return registry

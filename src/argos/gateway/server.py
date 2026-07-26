@@ -26,18 +26,22 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from argos.config import Settings, get_settings
 from argos.harness.loop import AgentLoop
 from argos.harness.permissions import PermissionGate, PermissionRequest
-from argos.memory.embeddings import OllamaEmbedder
-from argos.memory.store import MemoryStore
+from argos.memory.store import EntityKind, MemoryStore
 from argos.models.base import TaskKind
 from argos.models.providers import ProviderCatalog, ProviderKind, ProviderSpec
 from argos.models.router import ModelRouter
+from argos.perception.camera import CameraBridge
+from argos.perception.hands import ExpressionReader, HandCounter
+from argos.perception.identity import FaceRecognizer
 from argos.perception.stt import SpeechToText
+from argos.perception.tts import BrowserTTS, EdgeTTS, TextToSpeech
+from argos.perception.vlm import VisionLanguageModel
 from argos.tools.registry import default_registry
 from argos.trace import Event, Tracer
 
@@ -97,15 +101,52 @@ class Hub:
         self.tracer = Tracer(settings=self.settings)
         self.catalog = ProviderCatalog(settings=self.settings)
         self.stt = SpeechToText()
+        self.tts: TextToSpeech = EdgeTTS() if self.settings.agent.voice else BrowserTTS()
         self.approver = WebApprover(self)
         self.gate = PermissionGate(
             approver=self.approver, tracer=self.tracer, settings=self.settings
         )
-        self.registry = default_registry(gate=self.gate, tracer=self.tracer)
         self.memory: MemoryStore | None = None
+        self.open_memory()  # antes del registro: decide si hay skills de memoria
+
+        # Con quién habla. Arranca en el dueño del equipo porque es lo más probable,
+        # pero el agente puede reasignarlo con `identify_speaker` si resulta ser
+        # otra persona. En Fase 2 lo reasignará el reconocimiento facial.
+        self.speaker: str = self.settings.agent.user
+        self.speaker_id: int | None = None
+
+        if self.memory is not None:
+            # Si el dueño ya está en memoria, los episodios se le asocian desde el
+            # primer turno en vez de quedar sueltos hasta que alguien se identifique.
+            entidad = self.memory.get_entity(EntityKind.PERSONA, self.speaker)
+            if entidad is not None:
+                self.speaker_id = entidad.id
+
+        # La visión es opcional: si el puente de cámara no está corriendo en
+        # Windows, el agente arranca igual y sin esas skills. Las preconditions
+        # comprueban el puente en cada uso, así que puede aparecer más tarde.
+        self.camera = CameraBridge()
+        self.recognizer = FaceRecognizer()
+        self.vlm = VisionLanguageModel()
+        self.hands = HandCounter()
+        self.expression = ExpressionReader()
+
+        self.registry = default_registry(
+            gate=self.gate,
+            tracer=self.tracer,
+            memory=self.memory,
+            on_identified=self.set_speaker,
+            vision=(self.camera, self.recognizer, self.vlm, self.hands, self.expression),
+        )
         self.session = self.tracer.session_id
         self._history: list[dict[str, Any]] = []
         self._busy = False
+
+    def set_speaker(self, nombre: str, entity_id: int) -> None:
+        """Reasigna el interlocutor. Único punto de entrada, venga de donde venga."""
+        self.speaker, self.speaker_id = nombre, entity_id
+        self.tracer.emit(Event.SKILL_RESULT, skill="identify_speaker", ok=True, speaker=nombre)
+        self.send_sync({"type": "speaker", "name": nombre})
 
     # ── memoria ───────────────────────────────────────────────────────────
 
@@ -115,10 +156,9 @@ class Hub:
         if self.memory is not None:
             return self.memory
         try:
-            embedder = OllamaEmbedder()
-            ok, _ = embedder.health()
-            if not ok:
-                return None
+            from argos.memory.seed import build_embedder
+
+            embedder, _ = build_embedder(self.settings)
             self.memory = MemoryStore(self.settings.paths.resolved("memory_db"), embedder)
         except Exception:
             return None
@@ -172,30 +212,70 @@ class Hub:
         contexto = ""
         if memoria is not None:
             try:
-                recuerdos = memoria.recall_episodes(texto, limit=4)
-                reglas = memoria.rules(limit=8)
+                # El perfil del interlocutor va SIEMPRE, sin pasar por similitud.
+                perfil = memoria.facts_about(self.speaker)
+                hechos = memoria.recall_facts(texto, limit=5)
+                recuerdos = memoria.recall_episodes(texto, limit=3)
+                reglas = memoria.rules(limit=6)
                 partes = []
+                if perfil:
+                    lineas = "\n".join(f"- {self.speaker} {h.fact}" for h in perfil)
+                    # El puente pronominal es imprescindible: los hechos se guardan
+                    # en tercera persona ("Sadid es físico") y las preguntas llegan
+                    # en primera ("¿quién soy yo?"). Sin decirlo explícitamente, un
+                    # modelo de 4B tiene el dato delante y responde "no lo sé".
+                    partes.append(
+                        f"Estás hablando con {self.speaker}. Cuando dice «yo», «mi» o "
+                        f"«me» se refiere a {self.speaker}. Esto es lo que sabes de "
+                        f"él:\n{lineas}"
+                    )
+                else:
+                    # Sin perfil, decírselo explícitamente. Si no, el modelo responde
+                    # "no tengo información" y ahí muere la conversación; el objetivo
+                    # es que pregunte y aprenda.
+                    partes.append(
+                        f"No sabes todavía quién es la persona con la que hablas (no "
+                        f"tienes datos guardados sobre «{self.speaker}»). Si la "
+                        f"conversación lo pide, preséntate y pregúntale su nombre; "
+                        f"cuando te lo diga, usa identify_speaker."
+                    )
+                if hechos:
+                    lineas = "\n".join(f"- {h.subject}: {h.fact}" for h in hechos)
+                    partes.append(f"Datos que ya sabes:\n{lineas}")
                 if recuerdos:
                     lineas = "\n".join(f"- {r.content}" for r in recuerdos)
-                    partes.append(f"Recuerdas de conversaciones anteriores:\n{lineas}")
+                    partes.append(f"Fragmentos de conversaciones previas:\n{lineas}")
                 if reglas:
                     lineas = "\n".join(f"- {r.render()}" for r in reglas)
-                    partes.append(f"Reglas que has aprendido:\n{lineas}")
-                contexto = "\n\n".join(partes)
+                    partes.append(f"Reglas que aprendiste:\n{lineas}")
+                contexto = (
+                    "<memoria>\n" + "\n\n".join(partes) + "\n</memoria>\n"
+                    "Eso es lo que recuerdas SOBRE OTROS. Úsalo con naturalidad, sin "
+                    "recitarlo; si no viene a cuento, ignóralo.\n"
+                    "Tu memoria NO te describe a ti. Si te preguntan por ti —qué te "
+                    "gusta, quién eres, qué opinas— responde desde tu identidad, que "
+                    "ya conoces. Nunca busques en la memoria para hablar de ti mismo, "
+                    "y nunca digas que no tienes gustos ni opiniones."
+                )
             except Exception:
                 contexto = ""
 
-        mensaje = f"{contexto}\n\n---\n\n{texto}" if contexto else texto
-
+        # El contexto va al prompt de SISTEMA, no al mensaje del usuario: probado
+        # al revés, el modelo recitaba el perfil en vez de responder la pregunta.
         loop_agente = self.build_loop()
-        resultado = loop_agente.run(mensaje, history=list(self._history))
+        resultado = loop_agente.run(texto, history=list(self._history), extra_system=contexto)
 
         # Registrar DESPUÉS: la conversación de hoy es el recuerdo de mañana.
+        # Los episodios quedan asociados a la persona con la que se habló, así que
+        # mañana se pueden recuperar filtrando por ella. Si `identify_speaker` se
+        # invocó a mitad de este turno, `self.speaker_id` ya apunta a la correcta.
         if memoria is not None:
             try:
-                memoria.remember_episode(self.session, "user", texto)
+                memoria.remember_episode(self.session, "user", texto, entity_id=self.speaker_id)
                 if resultado.text:
-                    memoria.remember_episode(self.session, "agent", resultado.text)
+                    memoria.remember_episode(
+                        self.session, "agent", resultado.text, entity_id=self.speaker_id
+                    )
             except Exception:
                 pass
 
@@ -228,8 +308,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     @app.get("/")
-    async def index() -> FileResponse:
-        return FileResponse(STATIC / "index.html")
+    async def index() -> Response:
+        """Sirve el HUD con las URLs de CSS y JS versionadas por fecha de archivo.
+
+        Sin esto, el navegador cachea `styles.css` y `app.js` y sigue mostrando la
+        interfaz anterior aunque el servidor ya tenga la nueva. Pasó de verdad: se
+        añadió el panel de cámara, el servidor lo servía, y en pantalla no
+        aparecía — un fallo que parece del código y es del caché.
+        """
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        for recurso in ("styles.css", "app.js"):
+            ruta = STATIC / recurso
+            version = int(ruta.stat().st_mtime) if ruta.is_file() else 0
+            html = html.replace(f"/static/{recurso}", f"/static/{recurso}?v={version}")
+        # El propio HTML nunca se cachea: es quien lleva los números de versión.
+        return Response(html, media_type="text/html", headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/frame.jpg")
+    async def frame() -> Response:
+        """Reexpone el fotograma al HUD.
+
+        El navegador no puede ir al puente directamente: el token vive en WSL, no
+        en el navegador, y mandárselo sería filtrarlo a cualquier pestaña. El
+        gateway hace de intermediario y el token no sale de aquí.
+        """
+        try:
+            imagen = await asyncio.to_thread(hub.camera.grab)
+        except Exception as exc:
+            return Response(f"sin cámara: {exc}", status_code=503, media_type="text/plain")
+        if imagen.is_empty:
+            return Response("sin cámara", status_code=503, media_type="text/plain")
+        return Response(imagen.jpeg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
@@ -343,6 +452,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
+async def _hablar(hub: Hub, texto: str) -> None:
+    """Genera la voz y la envía. Si falla, el navegador habla con la suya.
+
+    Un fallo de red en el TTS no debe dejar al agente mudo: se degrada a la voz
+    local del sistema en vez de perder la respuesta hablada.
+    """
+    try:
+        voz = await hub.tts.synth(texto)
+    except Exception as exc:
+        hub.tracer.emit(Event.ERROR, where="tts", error=repr(exc))
+        voz = None
+
+    if voz is not None and not voz.is_empty:
+        await hub.send({"type": "speak_audio", "mime": voz.mime, "chars": voz.chars})
+        for ws in list(hub.clients):
+            try:
+                await ws.send_bytes(voz.audio)
+            except Exception:
+                hub.clients.discard(ws)
+    else:
+        # Sin audio: que hable el navegador con sus voces locales.
+        await hub.send({"type": "speak", "text": texto})
+
+
 async def _procesar(hub: Hub, texto: str, hablar: bool) -> None:
     if hub._busy:
         await hub.send({"type": "notice", "message": "Estoy con la petición anterior."})
@@ -358,7 +491,7 @@ async def _procesar(hub: Hub, texto: str, hablar: bool) -> None:
         await hub.send({"type": "message", "role": "agent", "text": resultado["text"]})
         await hub.send({"type": "telemetry", **resultado})
         if hablar and resultado["text"]:
-            await hub.send({"type": "speak", "text": resultado["text"]})
+            await _hablar(hub, resultado["text"])
         await hub.set_state("en espera")
     except Exception as exc:
         hub.tracer.emit(Event.ERROR, where="procesar", error=repr(exc))

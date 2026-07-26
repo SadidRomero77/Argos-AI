@@ -32,6 +32,10 @@ lint() { uv run ruff check --fix .; uv run ruff format .; uv run ruff check .; }
 
 eval() { up; uv run python -m argos.evals "${@:-qwen3:4b}"; }
 
+models() { # descarga los .task de MediaPipe si faltan
+  uv run python -c "from argos.perception.hands import descargar_modelos; [print('  ✓', m) for m in descargar_modelos()]"
+}
+
 ui() { # levanta el HUD web
   up
   echo "· HUD en http://localhost:8420  (Ctrl+C para parar)"
@@ -72,6 +76,7 @@ status() { # panorama en 10 segundos
 
 help() {
   cat <<'EOF'
+  ./dev models          descarga los modelos de gestos y expresión
   ./dev ui              interfaz web en http://localhost:8420
   ./dev status          panorama del proyecto
   ./dev up | down       arrancar / parar el modelo local
@@ -87,6 +92,6 @@ EOF
 
 cmd="${1:-help}"; shift || true
 case "$cmd" in
-  up|down|test|testall|lint|eval|ask|yolo|trace|status|ui|help) "$cmd" "$@" ;;
+  up|down|test|testall|lint|eval|ask|yolo|trace|status|ui|models|help) "$cmd" "$@" ;;
   *) echo "comando desconocido: $cmd"; help; exit 1 ;;
 esac

@@ -75,7 +75,17 @@ class OllamaEmbedder:
             return np.zeros((0, self._dimensions or 0), dtype=np.float32)
 
         respuesta = self._client.post(
-            f"{self.base_url}/api/embed", json={"model": self.model, "input": texts}
+            f"{self.base_url}/api/embed",
+            json={
+                "model": self.model,
+                "input": texts,
+                # A CPU a propósito. En GPU ocupa 664 MB permanentes, y con 4,5 GB
+                # útiles eso decide si el cerebro y el modelo de visión caben a la
+                # vez o si Ollama tiene que intercambiarlos en cada pregunta
+                # visual — que cuesta minuto y medio. Embeder es rápido y ocurre
+                # pocas veces: es el mejor sitio del sistema para ceder GPU.
+                "options": {"num_gpu": 0},
+            },
         )
         respuesta.raise_for_status()
         vectores = respuesta.json().get("embeddings") or []
@@ -133,3 +143,44 @@ class FakeEmbedder:
             rng = np.random.default_rng(int.from_bytes(digest, "big"))
             vectores.append(rng.standard_normal(self._dimensions))
         return normalize(np.asarray(vectores, dtype=np.float32))
+
+
+class LexicalEmbedder:
+    """Bolsa de palabras con hashing. Sin modelo, sin red, sin dependencias.
+
+    No entiende significado —"can" y "perro" son ajenos para él— pero sí captura
+    solapamiento de vocabulario, que basta para dos cosas:
+
+    1. **Respaldo real**: si no hay servidor de embeddings, la memoria sigue
+       funcionando en modo degradado en vez de desaparecer.
+    2. **Pruebas de relevancia**: textos que comparten palabras dan similitud
+       alta y textos ajenos la dan baja, que es justo la propiedad que hay que
+       verificar. `FakeEmbedder` no sirve para eso: sus vectores son aleatorios,
+       así que dos frases del mismo tema salen tan distintas como dos ajenas.
+    """
+
+    def __init__(self, dimensions: int = 512) -> None:
+        self._dimensions = dimensions
+
+    @property
+    def dimensions(self) -> int:
+        return self._dimensions
+
+    @staticmethod
+    def _tokens(texto: str) -> list[str]:
+        limpio = "".join(c.lower() if c.isalnum() else " " for c in texto)
+        # Las palabras de una letra son ruido y las tildes ya las normaliza casefold.
+        return [t for t in limpio.split() if len(t) > 1]
+
+    def embed(self, texts: list[str]) -> np.ndarray:
+        if not texts:
+            return np.zeros((0, self._dimensions), dtype=np.float32)
+        matriz = np.zeros((len(texts), self._dimensions), dtype=np.float32)
+        for fila, texto in enumerate(texts):
+            for token in self._tokens(texto):
+                indice = (
+                    int.from_bytes(hashlib.blake2b(token.encode(), digest_size=4).digest(), "big")
+                    % self._dimensions
+                )
+                matriz[fila, indice] += 1.0
+        return normalize(matriz)

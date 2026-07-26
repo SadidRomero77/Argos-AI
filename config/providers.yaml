@@ -1,0 +1,24 @@
+active: local
+providers:
+- name: local
+  kind: openai
+  model: qwen3:4b
+  base_url: http://localhost:11434/v1
+  label: Ollama local · qwen3:4b
+  num_ctx: 16384
+- name: local-8b
+  kind: openai
+  model: qwen3:8b
+  base_url: http://localhost:11434/v1
+  label: Ollama local · qwen3:8b
+  num_ctx: 16384
+- name: claude-haiku
+  kind: claude
+  model: claude-haiku-4-5
+  secret_key: ANTHROPIC_API_KEY
+  label: Claude Haiku 4.5 · rápido y barato
+- name: claude-sonnet
+  kind: claude
+  model: claude-sonnet-5
+  secret_key: ANTHROPIC_API_KEY
+  label: Claude Sonnet 5 · razonamiento

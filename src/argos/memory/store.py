@@ -283,12 +283,20 @@ class MemoryStore:
         limit: int = 5,
         entity_id: int | None = None,
         recency_weight: float = 0.3,
+        min_similarity: float = 0.45,
     ) -> list[Episode]:
-        """Recupera por similitud **y** recencia.
+        """Recupera por similitud **y** recencia, descartando lo irrelevante.
 
-        Sólo por similitud, el agente desentierra conversaciones de hace meses
-        ignorando lo de hace cinco minutos. `recency_weight` es cuánto pesa lo
-        reciente frente a lo parecido.
+        `min_similarity` es un filtro sobre la similitud **cruda**, aplicado antes
+        de mezclar con la recencia. Sin él, recordar siempre devuelve los `limit`
+        más parecidos aunque ninguno venga a cuento: con un solo recuerdo guardado
+        ("hay 33 archivos .py"), un saludo como "hola" lo recuperaba y el agente
+        respondía al saludo hablando de archivos. Devolver *nada* es la respuesta
+        correcta cuando nada es pertinente.
+
+        `recency_weight` es cuánto pesa lo reciente frente a lo parecido: sólo por
+        similitud, el agente desentierra conversaciones de hace meses ignorando lo
+        de hace cinco minutos.
         """
         sql = "SELECT * FROM episodic WHERE embedding IS NOT NULL"
         params: list[Any] = []
@@ -305,8 +313,13 @@ class MemoryStore:
         candidatos: list[tuple[sqlite3.Row, float]] = []
         for fila in filas:
             vector = _from_blob(fila["embedding"], dims)
-            if vector is not None:
-                candidatos.append((fila, float(np.dot(objetivo, vector))))
+            if vector is None:
+                continue
+            similitud = float(np.dot(objetivo, vector))
+            # Filtro sobre la similitud CRUDA, antes de reescalar: tras el
+            # reescalado el mejor candidato siempre vale 1,0 aunque sea basura.
+            if similitud >= min_similarity:
+                candidatos.append((fila, similitud))
         if not candidatos:
             return []
 
@@ -377,7 +390,14 @@ class MemoryStore:
         self._db.commit()
         return int(cursor.lastrowid)
 
-    def recall_facts(self, query: str, limit: int = 5, subject: str | None = None) -> list[Fact]:
+    def recall_facts(
+        self,
+        query: str,
+        limit: int = 5,
+        subject: str | None = None,
+        min_similarity: float = 0.4,
+    ) -> list[Fact]:
+        """Hechos relevantes. Como en los episodios, lo irrelevante no se devuelve."""
         sql = "SELECT * FROM semantic WHERE embedding IS NOT NULL"
         params: list[Any] = []
         if subject is not None:
@@ -392,8 +412,11 @@ class MemoryStore:
         puntuados = []
         for fila in filas:
             vector = _from_blob(fila["embedding"], dims)
-            if vector is not None:
-                puntuados.append((fila, float(np.dot(objetivo, vector))))
+            if vector is None:
+                continue
+            similitud = float(np.dot(objetivo, vector))
+            if similitud >= min_similarity:
+                puntuados.append((fila, similitud))
         puntuados.sort(key=lambda par: par[1], reverse=True)
 
         return [
@@ -406,6 +429,28 @@ class MemoryStore:
                 score=round(score, 4),
             )
             for fila, score in puntuados[:limit]
+        ]
+
+    def facts_about(self, subject: str, limit: int = 40) -> list[Fact]:
+        """TODOS los hechos de un sujeto, sin filtro de similitud.
+
+        La búsqueda vectorial falla justo donde más importa: los hechos se guardan
+        en tercera persona ("Sadid es físico") y el usuario pregunta en primera
+        ("¿quién soy?"), así que los vectores no casan. El perfil del usuario no
+        debe depender de que acierte un embedding: se inyecta siempre.
+        """
+        filas = self._db.execute(
+            "SELECT * FROM semantic WHERE subject = ? ORDER BY id LIMIT ?", (subject, limit)
+        ).fetchall()
+        return [
+            Fact(
+                id=f["id"],
+                subject=f["subject"],
+                fact=f["fact"],
+                entity_id=f["entity_id"],
+                updated_at=f["updated_at"],
+            )
+            for f in filas
         ]
 
     def forget_fact(self, fact_id: int) -> bool:
