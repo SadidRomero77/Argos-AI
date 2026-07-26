@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from argos.config import Settings, get_settings
@@ -303,8 +303,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     @app.get("/")
-    async def index() -> FileResponse:
-        return FileResponse(STATIC / "index.html")
+    async def index() -> Response:
+        """Sirve el HUD con las URLs de CSS y JS versionadas por fecha de archivo.
+
+        Sin esto, el navegador cachea `styles.css` y `app.js` y sigue mostrando la
+        interfaz anterior aunque el servidor ya tenga la nueva. Pasó de verdad: se
+        añadió el panel de cámara, el servidor lo servía, y en pantalla no
+        aparecía — un fallo que parece del código y es del caché.
+        """
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        for recurso in ("styles.css", "app.js"):
+            ruta = STATIC / recurso
+            version = int(ruta.stat().st_mtime) if ruta.is_file() else 0
+            html = html.replace(f"/static/{recurso}", f"/static/{recurso}?v={version}")
+        # El propio HTML nunca se cachea: es quien lleva los números de versión.
+        return Response(html, media_type="text/html", headers={"Cache-Control": "no-store"})
 
     @app.get("/api/frame.jpg")
     async def frame() -> Response:
