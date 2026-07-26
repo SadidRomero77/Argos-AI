@@ -111,7 +111,34 @@ def test_las_definiciones_van_en_orden_estable():
 
 def test_el_registro_por_defecto_trae_las_skills_de_fase_1():
     registry = default_registry(gate=gate_con(Decision.ALLOW))
-    assert set(registry.names) == {"glob", "read_file", "write_note", "run_command"}
+    assert set(registry.names) == {
+        "glob",
+        "read_file",
+        "write_note",
+        "run_command",
+        "weather",
+        "search_web",
+        "fetch_url",
+    }
+
+
+def test_sin_memoria_no_se_registran_las_skills_de_memoria():
+    """El agente debe arrancar aunque no haya embeddings: sin continuidad, pero vivo."""
+    registry = default_registry(gate=gate_con(Decision.ALLOW), memory=None)
+    assert not {"remember", "recall", "forget", "identify_speaker"} & set(registry.names)
+
+
+def test_las_skills_que_traen_contenido_de_terceros_piden_permiso():
+    """search_web y fetch_url meten texto ajeno en el razonamiento: nunca en `allow`.
+
+    El riesgo no es el coste sino la inyección indirecta — una página puede
+    contener instrucciones dirigidas al agente.
+    """
+    policy = PermissionGate().policy
+    assert policy.skills["search_web"].decision is Decision.ASK
+    assert policy.skills["fetch_url"].decision is Decision.ASK
+    # weather sí puede ir en allow: devuelve números de una API, no texto libre.
+    assert policy.skills["weather"].decision is Decision.ALLOW
 
 
 def test_toda_ejecucion_queda_en_la_traza(tmp_path, monkeypatch):

@@ -35,7 +35,21 @@ skills:
   search_web:
     decision: ask
     min_phase: 1
-    reason: "Sale a internet: coste, y el resultado es contenido NO confiable."
+    reason: >-
+      Mete texto de terceros en el razonamiento del agente. El riesgo no es el
+      coste sino la inyección indirecta: una página puede contener instrucciones.
+
+  fetch_url:
+    decision: ask
+    min_phase: 1
+    reason: "Igual que search_web: contenido no confiable dentro del contexto."
+
+  weather:
+    decision: allow
+    min_phase: 1
+    reason: >-
+      Datos numéricos de una API pública sin clave. No devuelve texto libre de
+      terceros, así que no es vector de inyección.
 
   run_command:
     decision: ask

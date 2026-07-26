@@ -97,9 +97,13 @@ def default_registry(
     """
     from argos.skills.fs import Glob, ReadFile, WriteNote
     from argos.skills.shell import RunCommand
+    from argos.skills.weather import Weather
+    from argos.skills.web import FetchUrl, SearchWeb
 
     registry = SkillRegistry(gate=gate, tracer=tracer)
-    registry.register_all(Glob(), ReadFile(), WriteNote(), RunCommand())
+    registry.register_all(
+        Glob(), ReadFile(), WriteNote(), RunCommand(), Weather(), SearchWeb(), FetchUrl()
+    )
 
     if memory is not None:
         from argos.skills.memory import Forget, IdentifySpeaker, Recall, Remember
